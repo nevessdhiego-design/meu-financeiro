@@ -1,0 +1,16 @@
+{
+  "name": "Meu Financeiro",
+  "short_name": "Financeiro",
+  "start_url": "./Meu%20Financeiro.html",
+  "display": "standalone",
+  "background_color": "#05070f",
+  "theme_color": "#05070f",
+  "icons": [
+    {
+      "src": "./icone-financeiro.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
