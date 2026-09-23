@@ -7,9 +7,15 @@
   "theme_color": "#05070f",
   "icons": [
     {
-      "src": "./icone-financeiro.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "./icone-financeiro-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icone-financeiro-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
