@@ -33,17 +33,19 @@ h2{font-size:.9rem;margin:28px 0 10px;padding-bottom:6px;letter-spacing:.05em;bo
 .tab{flex:1;text-align:center;padding:8px;border-radius:8px;font-size:.85rem;font-weight:600;cursor:pointer;color:var(--muted);transition:all .2s ease;}
 .tab.active{background:transparent;border:1px solid var(--accent);box-shadow:0 0 10px rgba(0,240,255,.4);color:var(--accent);}
 .view{display:none;} .view.active{display:block;}
-.cards{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;}
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px;}
+.cards:not(.bentoCards) .card{min-height:82px;display:flex;flex-direction:column;justify-content:center;}
+.cards:not(.bentoCards) .card.saldo{grid-column:1 / -1;order:-1;}
 .bentoCards{grid-template-columns:2fr 1fr 1fr;grid-template-areas:"saldo saldo entradas" "saldo saldo saidas";gap:10px;}
 .bentoCards .saldo{grid-area:saldo;}
 .bentoCards .entradas{grid-area:entradas;}
 .bentoCards .saidas{grid-area:saidas;}
 .card,.goal{position:relative;isolation:isolate;}
-.card{background-color:rgba(13,18,36,.6);border:1px solid rgba(0,240,255,.15);border-radius:12px;padding:10px;text-align:center;}
-.card.saldo{border-radius:18px;padding:18px;transform:scale(1.02);box-shadow:0 0 22px rgba(212,175,106,.22),0 0 10px rgba(0,240,255,.18);}
+.card{background:linear-gradient(145deg,rgba(20,33,61,.86),rgba(13,18,36,.72));border:1px solid rgba(0,240,255,.22);border-radius:12px;padding:14px 10px;text-align:center;box-shadow:0 8px 18px rgba(0,0,0,.16);}
+.card.saldo{border-radius:18px;padding:18px;box-shadow:0 0 22px rgba(212,175,106,.22),0 0 10px rgba(0,240,255,.18);}
 .card.saldo,.reserveGoal{border-color:rgba(212,175,106,.42);}
 .card > *, .goal > *{position:relative;z-index:2;}
-.card .label{font-size:.64rem;color:var(--muted);}
+.card .label{font-size:.68rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;}
 .card .value{font-family:'JetBrains Mono','Courier New',monospace;font-size:.92rem;font-weight:600;margin-top:2px;word-break:break-word;}
 .saldo .value{color:var(--gold);text-shadow:0 0 8px var(--gold-glow);} .entradas .value{color:var(--pos);} .saidas .value{color:var(--neg);}
 .pend{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:8px 12px;font-size:.76rem;color:var(--muted);margin-bottom:14px;text-align:center;}
@@ -101,10 +103,11 @@ form{background:rgba(13,18,36,.6);border:1px solid rgba(0,240,255,.15);border-ra
 .catrow{cursor:pointer;}
 .toast{position:fixed;z-index:10;left:50%;bottom:20px;transform:translate(-50%,20px);opacity:0;padding:10px 16px;background:rgba(13,18,36,.95);border:1px solid var(--gold);box-shadow:0 0 14px var(--gold-glow);color:var(--gold);font-size:.8rem;pointer-events:none;transition:all .25s ease;}
 .toast.show{transform:translate(-50%,0);opacity:1;}
-form .row{display:flex;gap:8px;margin-bottom:8px;}
+form .row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:12px;}
+form .row.single{grid-template-columns:minmax(0,1fr);}
 input,select{width:100%;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:.9rem;}
 label{font-size:.68rem;color:var(--muted);display:block;margin-bottom:3px;}
-.field{flex:1;}
+.field{min-width:0;}
 button{cursor:pointer;border:none;border-radius:8px;padding:10px 14px;font-size:.86rem;font-weight:600;transition:all .2s ease;}
 .btn-primary{background:transparent;border:1px solid var(--accent);box-shadow:0 0 10px rgba(0,240,255,.4);color:var(--accent);width:100%;}
 .btn-cancel{background:transparent;color:var(--muted);width:100%;margin-top:6px;font-weight:500;}
@@ -144,7 +147,10 @@ summary{font-size:.88rem;font-weight:600;cursor:pointer;}
   .tab{padding:8px 4px;font-size:.76rem;}
   .modal{width:calc(100vw - 24px);max-width:none;max-height:calc(100dvh - 24px);}
   .modalHead{position:sticky;top:0;z-index:4;background:var(--card);}
-  .form .row,form .row{min-width:0;}
+  form .row{grid-template-columns:1fr;gap:10px;margin-bottom:10px;}
+  .modal form{padding:16px 14px 14px;}
+  .modal form input,.modal form select{min-height:44px;}
+  .cards:not(.bentoCards){grid-template-columns:repeat(2,minmax(0,1fr));}
   .monthControl{align-items:stretch;flex-direction:column;gap:8px;}
   .monthControl input{width:100%;}
 }
@@ -259,7 +265,7 @@ summary{font-size:.88rem;font-weight:600;cursor:pointer;}
         <select id="tipo"><option value="Entrada">Entrada</option><option value="Saída">Saída</option></select>
       </div>
     </div>
-    <div class="row">
+    <div class="row single">
       <div class="field"><label>Categoria</label>
         <select id="categoria">
           <option>Salário</option><option>VR</option><option>VT</option><option>Moradia</option>
@@ -269,14 +275,14 @@ summary{font-size:.88rem;font-weight:600;cursor:pointer;}
         </select>
       </div>
     </div>
-    <div class="row"><div class="field"><label>Descrição</label><input type="text" id="desc" required placeholder="Ex: Mercado"></div></div>
+    <div class="row single"><div class="field"><label>Descrição</label><input type="text" id="desc" required placeholder="Ex: Mercado"></div></div>
     <div class="row">
       <div class="field"><label>Valor (R$)</label><input type="number" id="valor" step="0.01" min="0" required placeholder="0,00"></div>
       <div class="field"><label>Forma de pagamento</label>
         <select id="forma"><option>Débito</option><option>Crédito</option><option>Pix</option><option>Dinheiro</option><option>Benefício</option><option>Outro</option></select>
       </div>
     </div>
-    <div class="row"><div class="field"><label>Pago?</label><select id="pago"><option>Sim</option><option>Não</option></select></div></div>
+    <div class="row single"><div class="field"><label>Pago?</label><select id="pago"><option>Sim</option><option>Não</option></select></div></div>
     <button type="submit" class="btn-primary" id="btnSubmit">Adicionar lançamento</button>
     <button type="button" class="btn-cancel" id="btnCancelEdit" style="display:none;">Cancelar edição</button>
   </form>
@@ -326,6 +332,22 @@ let config = {
   salario:1985, dias:22, vr:30, vt:10.8, faculdade:500, celular:291, parcelasRestantes:11, cartao:600,
   lazer:600, investAlvo:400, metaReserva:12000, metaPatrim:186000, reservaAtual:108.623, patrimAtual:0
 };
+const STORAGE_KEY = 'meu-financeiro-v1';
+const DEMO_TRANSACTION_IDS = new Set(['tx_faculdade_paga','tx_celular_parcela_1','tx_cartao_lazer']);
+
+function loadLocalState(){
+  try{
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');
+    if(!saved) return;
+    if(saved.config) config = {...config, ...saved.config};
+    if(Array.isArray(saved.transactions)) transactions = saved.transactions;
+    transactions = transactions.filter(transaction => !DEMO_TRANSACTION_IDS.has(transaction.id));
+  }catch(e){ console.warn('Não foi possível ler os dados locais', e); }
+}
+function saveLocalState(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({config,transactions})); }
+  catch(e){ console.warn('Não foi possível salvar os dados locais', e); }
+}
 
 function fmt(n){ return (n<0?'-':'') + 'R$ ' + Math.abs(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function pct(n){ return (n*100).toLocaleString('pt-BR',{maximumFractionDigits:1}) + '%'; }
@@ -502,6 +524,7 @@ btnSaveCfg.addEventListener('click', async ()=>{
   renderGeral();
   showToast('Configurações salvas ✓');
   if(db){ try{ await db.doc('config/main').set(config); }catch(e){ console.error(e); } }
+  saveLocalState();
   if(reservaModal.open) reservaModal.close();
 });
 
@@ -603,29 +626,18 @@ async function addTransaction(t){
   t.id = 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
   transactions.push(t); render();
   if(db){ try{ await db.doc('transactions/'+t.id).set(t); }catch(e){ console.error(e); } }
+  saveLocalState();
 }
 async function updateTransaction(id, t){
   const idx = transactions.findIndex(x=>x.id===id); if(idx<0) return;
   t.id = id; transactions[idx] = t; render();
   if(db){ try{ await db.doc('transactions/'+id).set(t); }catch(e){ console.error(e); } }
+  saveLocalState();
 }
 async function removeTransaction(id){
   transactions = transactions.filter(t=>t.id!==id); render();
   if(db){ try{ await db.doc('transactions/'+id).delete(); }catch(e){ console.error(e); } }
-}
-
-async function ensureInitialTransactions(){
-  const data = new Date().toISOString().slice(0,10);
-  const initial = [
-    {id:'tx_faculdade_paga', descricao:'Faculdade paga', valor:500, tipo:'Saída', categoria:'Faculdade', forma:'Débito', pago:'Sim', data},
-    {id:'tx_celular_parcela_1', descricao:'1ª parcela do celular paga', valor:291, tipo:'Saída', categoria:'Celular', forma:'Débito', pago:'Sim', data},
-    {id:'tx_cartao_lazer', descricao:'Cartão de crédito usado no lazer', valor:543.83, tipo:'Saída', categoria:'Lazer', forma:'Crédito', pago:'Não', data}
-  ];
-  for(const item of initial){
-    if(transactions.some(t=>t.id===item.id)) continue;
-    transactions.push(item);
-    if(db){ try{ await db.doc('transactions/'+item.id).set(item); }catch(e){ console.error(e); } }
-  }
+  saveLocalState();
 }
 
 document.getElementById('form').addEventListener('submit', (e)=>{
@@ -678,8 +690,10 @@ btnExport.addEventListener('click', async ()=>{
   XLSX.utils.book_append_sheet(wb, ws, 'Lançamentos');
   const out = XLSX.write(wb, {bookType:'xlsx', type:'base64'});
   try{
-    const downloads = await claude.use('downloads');
-    if(downloads){ await downloads.save({filename:'lancamentos-financeiro.xlsx', data: out, encoding:'base64'}); return; }
+    if(typeof claude !== 'undefined' && claude.use){
+      const downloads = await claude.use('downloads');
+      if(downloads){ await downloads.save({filename:'lancamentos-financeiro.xlsx', data: out, encoding:'base64'}); return; }
+    }
   }catch(e){ console.error(e); }
   const bin = atob(out); const bytes = new Uint8Array(bin.length);
   for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
@@ -691,16 +705,19 @@ btnExport.addEventListener('click', async ()=>{
 
 (async ()=>{
   try{
-    db = await claude.use('db');
-    if(db){
-      const cfgDoc = await db.doc('config/main').get();
-      const cfgData = cfgDoc?.data ? cfgDoc.data() : cfgDoc;
-      if(cfgData && Object.keys(cfgData).length){ config = {...config, ...cfgData}; }
-      else { await db.doc('config/main').set(config); }
-      const snap = await db.collection('transactions').get();
-      transactions = (snap?.docs||snap||[]).map(d=> d.data ? d.data() : d);
+    loadLocalState();
+    if(typeof claude !== 'undefined' && claude.use){
+      db = await claude.use('db');
+      if(db){
+        const cfgDoc = await db.doc('config/main').get();
+        const cfgData = cfgDoc?.data ? cfgDoc.data() : cfgDoc;
+        if(cfgData && Object.keys(cfgData).length){ config = {...config, ...cfgData}; }
+        else { await db.doc('config/main').set(config); }
+        const snap = await db.collection('transactions').get();
+        transactions = (snap?.docs||snap||[]).map(d=> d.data ? d.data() : d);
+      }
     }
-    await ensureInitialTransactions();
+    saveLocalState();
   }catch(e){ console.error('init failed', e); }
   fillCfgForm(); render();
 })();
