@@ -114,6 +114,33 @@ button{cursor:pointer;border:none;border-radius:8px;padding:10px 14px;font-size:
 .toolbar{display:flex;gap:8px;margin-bottom:12px;}
 .btn-secondary{background:var(--card);color:var(--text);border:1px solid var(--border);flex:1;font-weight:500;font-size:.8rem;}
 .filters{display:flex;gap:6px;margin-bottom:12px;}
+.filters label{margin:0;}
+.filterControls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:8px;}
+.filterControls select{min-width:0;}
+.quickFilters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;}
+.quickFilters button{padding:7px 10px;font-size:.72rem;color:var(--muted);background:var(--card);border:1px solid var(--border);}
+.quickFilters button:hover,.quickFilters button.active{color:var(--accent);border-color:var(--accent);}
+.budgetRow{padding:10px 0;border-bottom:1px solid var(--border);}
+.budgetRow:last-child{border-bottom:0;}
+.budgetHead{display:flex;justify-content:space-between;gap:8px;font-size:.78rem;margin-bottom:6px;}
+.budgetHead strong{font-weight:600;white-space:nowrap;}
+.budgetHead .over{color:var(--neg);}
+.budgetHead .under{color:var(--pos);}
+.budgetRow .bar{height:7px;}
+.budgetRow .bar > div.overfill{background:var(--neg);}
+.dataTools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px;}
+.dataTools button{min-width:0;}
+.syncNote{margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;color:var(--muted);font-size:.74rem;line-height:1.45;}
+.onboarding{max-width:380px;padding:20px;}
+.onboarding h2{margin:0 0 8px;border:0;padding:0;font-size:1rem;}
+.onboarding p{font-size:.8rem;color:var(--muted);line-height:1.5;margin:0 0 14px;}
+.onboarding .field{margin-bottom:14px;}
+.previewTable{width:100%;border-collapse:collapse;font-size:.7rem;margin:12px 0;}
+.previewTable th,.previewTable td{text-align:left;padding:7px 5px;border-bottom:1px solid var(--border);}
+.previewTable th{color:var(--muted);font-weight:500;}
+.previewScroll{max-height:260px;overflow:auto;}
+.dialogActions{display:flex;gap:8px;margin-top:14px;}
+.dialogActions button{flex:1;}
 ul{list-style:none;padding:0;margin:0;}
 li{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
 .desc{font-weight:500;} .meta{font-size:.73rem;color:var(--muted);}
@@ -123,7 +150,7 @@ li{background:var(--card);border:1px solid var(--border);border-radius:10px;padd
 .icons{display:flex;gap:2px;} .iconbtn{background:none;color:var(--muted);font-size:.95rem;padding:2px 5px;transition:all .2s ease;}
 .iconbtn:hover{color:var(--accent);text-shadow:0 0 8px var(--accent);}
 .empty{color:var(--muted);text-align:center;padding:18px 0;font-size:.86rem;}
-#fileInput{display:none;}
+#fileInput,#jsonInput{display:none;}
 .hint{font-size:.68rem;color:var(--muted);margin:-6px 0 12px;}
 details{background:var(--card);border:1px solid rgba(0,240,255,.15);border-radius:14px;padding:12px 14px;margin-bottom:16px;}
 summary{font-size:.88rem;font-weight:600;cursor:pointer;}
@@ -151,6 +178,8 @@ summary{font-size:.88rem;font-weight:600;cursor:pointer;}
   .modal form{padding:16px 14px 14px;}
   .modal form input,.modal form select{min-height:44px;}
   .cards:not(.bentoCards){grid-template-columns:repeat(2,minmax(0,1fr));}
+  .filterControls{grid-template-columns:1fr;}
+  .dataTools{grid-template-columns:1fr;}
   .monthControl{align-items:stretch;flex-direction:column;gap:8px;}
   .monthControl input{width:100%;}
 }
@@ -171,19 +200,25 @@ summary{font-size:.88rem;font-weight:600;cursor:pointer;}
 
 <!-- VISÃO GERAL -->
 <div class="view active" id="view-geral">
+  <div class="goal onboardingHint" id="monthHint" hidden>
+    <div class="top"><span><span class="goalIcon">🗓️</span>Comece pelo mês de uso</span></div>
+    <div class="info">Escolha o primeiro mês que deseja acompanhar para organizar seu planejamento.</div>
+    <button type="button" class="btn-primary" id="btnChooseMonth" style="margin-top:10px">Escolher mês</button>
+  </div>
   <div class="cards">
     <div class="card"><div class="label">Recursos do mês</div><div class="value" id="vRecursos">—</div></div>
     <div class="card"><div class="label">Despesas fixas</div><div class="value" id="vDespesas">—</div></div>
     <div class="card saldo"><div class="label">Saldo planejado</div><div class="value" id="vSaldoPlan">—</div></div>
   </div>
 
-  <h2>Metas</h2>
+  <h2>Reserva</h2>
   <div class="goal reserveGoal" id="reservaCard" role="button" tabindex="0" onclick="showReservaModal()">
     <span class="expandIcon">⤢</span>
     <div class="top"><span><span class="goalIcon">🎯</span>Reserva de emergência</span><b id="gReservaPct">0%</b></div>
     <div class="bar"><div id="gReservaBar" style="width:0%"></div></div>
     <div class="info" id="gReservaInfo"></div>
   </div>
+  <h2>Acompanhamento</h2>
   <div class="goal">
     <div class="top"><span><span class="goalIcon">🎯</span>Patrimônio (renda passiva)</span><b id="gPatrimPct">0%</b></div>
     <div class="bar"><div id="gPatrimBar" style="width:0%"></div></div>
@@ -226,6 +261,7 @@ summary{font-size:.88rem;font-weight:600;cursor:pointer;}
       <div><label>Patrimônio — valor atual</label><input type="number" id="cfgPatrimAtual"></div>
     </div>
     <button class="btn-primary" style="margin-top:10px" id="btnSaveCfg">Salvar configurações</button>
+    <div class="syncNote"><strong>Sincronização automática desativada.</strong><br>Os dados ficam neste dispositivo até você configurar autenticação e um banco remoto.</div>
   </details>
 </div>
 
@@ -242,17 +278,30 @@ summary{font-size:.88rem;font-weight:600;cursor:pointer;}
     <button class="btn-secondary" id="btnImport">📥 Importar planilha</button>
     <button class="btn-secondary" id="btnExport">📤 Exportar planilha</button>
   </div>
+  <div class="dataTools">
+    <button class="btn-secondary" id="btnBackupJson">💾 Backup JSON</button>
+    <button class="btn-secondary" id="btnRestoreJson">↩ Restaurar JSON</button>
+    <button class="btn-secondary" id="btnClearData">🗑 Limpar lançamentos</button>
+  </div>
   <input type="file" id="fileInput" accept=".xlsx,.xls">
+  <input type="file" id="jsonInput" accept="application/json,.json">
   <div class="hint">Formato: Data, Tipo, Categoria, Descrição, Valor, Forma de pagamento, Pago?</div>
 
   <h2>Gastos por categoria (filtro atual)</h2>
   <div class="goal" id="catChart"></div>
+  <h2>Orçamento restante</h2>
+  <div class="goal" id="budgetChart"></div>
 
   <h2>Lançamentos</h2>
-  <div class="filters">
+  <div class="filterControls">
     <select id="fMes"></select>
     <select id="fCategoria"><option value="">Todas categorias</option></select>
     <select id="fTipo"><option value="">Todos tipos</option><option>Entrada</option><option>Saída</option></select>
+  </div>
+  <div class="quickFilters" aria-label="Filtros rápidos">
+    <button type="button" id="quickCurrentMonth">Mês atual</button>
+    <button type="button" id="quickExpenses">Só saídas</button>
+    <button type="button" id="quickClearFilters">Limpar filtros</button>
   </div>
 
   <button type="button" class="btn-primary" id="btnOpenForm">＋ Novo lançamento</button>
@@ -318,15 +367,39 @@ summary{font-size:.88rem;font-weight:600;cursor:pointer;}
     <div class="quickItem"><span>Meta da reserva</span><strong id="quickReservaPct">0%</strong></div>
   </div>
 </dialog>
+<dialog id="monthModal" class="modal onboarding">
+  <div class="modalHead"><strong>Primeiro mês de uso</strong><button type="button" class="modalClose" id="btnCloseMonth">✕</button></div>
+  <form id="monthForm">
+    <p>Escolha o mês a partir do qual seus lançamentos e seu planejamento serão acompanhados.</p>
+    <div class="field"><label for="firstUseMonth">Mês inicial</label><input type="month" id="firstUseMonth" required></div>
+    <button type="submit" class="btn-primary">Salvar mês inicial</button>
+  </form>
+</dialog>
+<dialog id="importModal" class="modal quickModal">
+  <div class="modalHead"><strong>Prévia da importação</strong><button type="button" class="modalClose" id="btnCloseImport">✕</button></div>
+  <div style="padding:14px;"><div id="importSummary" class="sub"></div><div class="previewScroll" id="importPreview"></div><div class="dialogActions"><button type="button" class="btn-cancel" id="btnCancelImport">Cancelar</button><button type="button" class="btn-primary" id="btnConfirmImport">Salvar lançamentos</button></div></div>
+</dialog>
+<dialog id="clearModal" class="modal deleteModal">
+  <strong>Limpar todos os lançamentos?</strong><div class="sub">A reserva e as configurações serão preservadas. Essa ação não pode ser desfeita sem um backup.</div>
+  <div class="dialogActions"><button type="button" class="btn-danger" id="btnConfirmClear">Limpar</button><button type="button" class="btn-secondary" id="btnCancelClear">Cancelar</button></div>
+</dialog>
+<dialog id="restoreModal" class="modal deleteModal">
+  <strong>Restaurar backup?</strong><div class="sub" id="restoreSummary"></div>
+  <div class="dialogActions"><button type="button" class="btn-primary" id="btnConfirmRestore">Restaurar</button><button type="button" class="btn-secondary" id="btnCancelRestore">Cancelar</button></div>
+</dialog>
 <div id="categoryTip" class="categoryTip" hidden></div>
 <div id="toast" class="toast" role="status"></div>
 <button type="button" class="quickFab" id="quickFab" aria-label="Abrir resumo rápido">👁</button>
 
 <script>
 let db = null;
+let authUser = null;
 let transactions = [];
 let editingId = null;
 let pendingDeleteId = null;
+let pendingImport = [];
+let pendingRestore = null;
+let firstUseMonthValue = null;
 let selectedMonth = new Date().toISOString().slice(0,7);
 let config = {
   salario:1985, dias:22, vr:30, vt:10.8, faculdade:500, celular:291, parcelasRestantes:11, cartao:600,
@@ -341,11 +414,12 @@ function loadLocalState(){
     if(!saved) return;
     if(saved.config) config = {...config, ...saved.config};
     if(Array.isArray(saved.transactions)) transactions = saved.transactions;
+    if(saved.firstUseMonth) firstUseMonthValue = saved.firstUseMonth;
     transactions = transactions.filter(transaction => !DEMO_TRANSACTION_IDS.has(transaction.id));
   }catch(e){ console.warn('Não foi possível ler os dados locais', e); }
 }
 function saveLocalState(){
-  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({config,transactions})); }
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({config,transactions,firstUseMonth:firstUseMonthValue})); }
   catch(e){ console.warn('Não foi possível salvar os dados locais', e); }
 }
 
@@ -437,6 +511,55 @@ controlMes.addEventListener('change', ()=>{
   fMes.value = selectedMonth;
   render();
 });
+btnChooseMonth.addEventListener('click', ()=>{
+  firstUseMonth.value = firstUseMonthValue || selectedMonth;
+  monthModal.showModal();
+});
+btnCloseMonth.addEventListener('click', ()=>monthModal.close());
+monthForm.addEventListener('submit', e=>{
+  e.preventDefault();
+  if(!firstUseMonth.value) return;
+  firstUseMonthValue = firstUseMonth.value;
+  selectedMonth = firstUseMonth.value;
+  controlMes.value = selectedMonth;
+  saveLocalState();
+  monthHint.hidden = true;
+  monthModal.close();
+  render();
+  showToast('Mês inicial salvo ✓');
+});
+btnCloseImport.addEventListener('click', ()=>importModal.close());
+btnCancelImport.addEventListener('click', ()=>{ pendingImport=[]; importModal.close(); });
+btnCancelClear.addEventListener('click', ()=>clearModal.close());
+btnConfirmClear.addEventListener('click', ()=>{
+  transactions = [];
+  saveLocalState();
+  clearModal.close();
+  render();
+  showToast('Lançamentos limpos ✓');
+});
+btnCancelRestore.addEventListener('click', ()=>{ pendingRestore=null; restoreModal.close(); });
+btnConfirmRestore.addEventListener('click', ()=>{
+  if(!pendingRestore) return;
+  config = {...config, ...pendingRestore.config};
+  transactions = pendingRestore.transactions;
+  if(pendingRestore.firstUseMonth) firstUseMonthValue = pendingRestore.firstUseMonth;
+  saveLocalState();
+  pendingRestore = null;
+  restoreModal.close();
+  fillCfgForm();
+  render();
+  showToast('Backup restaurado ✓');
+});
+quickCurrentMonth.addEventListener('click', ()=>{
+  fMes.value = selectedMonth; fCategoria.value = ''; fTipo.value = ''; render();
+});
+quickExpenses.addEventListener('click', ()=>{
+  fMes.value = selectedMonth; fCategoria.value = ''; fTipo.value = 'Saída'; render();
+});
+quickClearFilters.addEventListener('click', ()=>{
+  fMes.value = ''; fCategoria.value = ''; fTipo.value = ''; render();
+});
 btnCancelDelete.addEventListener('click', ()=>deleteModal.close());
 deleteModal.addEventListener('click', e=>{ if(e.target===deleteModal) deleteModal.close(); });
 btnConfirmDelete.addEventListener('click', async ()=>{
@@ -523,7 +646,7 @@ btnSaveCfg.addEventListener('click', async ()=>{
   };
   renderGeral();
   showToast('Configurações salvas ✓');
-  if(db){ try{ await db.doc('config/main').set(config); }catch(e){ console.error(e); } }
+  if(db && authUser){ try{ await db.doc('config/main').set(config); }catch(e){ console.error(e); } }
   saveLocalState();
   if(reservaModal.open) reservaModal.close();
 });
@@ -558,6 +681,22 @@ function renderCatChart(list){
   catChart.querySelectorAll('.catrow').forEach(row=>row.addEventListener('click',()=>showCategoryTip(row.dataset.category,row)));
 }
 
+function renderBudgetChart(){
+  const targets = {Faculdade:config.faculdade, Celular:config.celular, Cartão:config.cartao, Lazer:config.lazer, Investimentos:config.investAlvo};
+  const spent = {};
+  transactions.filter(t=>t.tipo==='Saída'&&(t.data||'').startsWith(selectedMonth)).forEach(t=>{
+    spent[t.categoria] = (spent[t.categoria]||0) + (Number(t.valor)||0);
+  });
+  budgetChart.innerHTML = Object.entries(targets).map(([category,target])=>{
+    const used = spent[category]||0;
+    const ratio = target>0 ? used/target : 0;
+    const remaining = target-used;
+    const fill = Math.min(ratio,1)*100;
+    const state = remaining<0 ? 'over' : 'under';
+    return `<div class="budgetRow"><div class="budgetHead"><span>${escapeHtml(category)}</span><strong class="${state}">${remaining<0?'excedeu ':'restam '}${fmt(Math.abs(remaining))}</strong></div><div class="bar"><div class="${remaining<0?'overfill':''}" style="width:${fill}%"></div></div></div>`;
+  }).join('');
+}
+
 function showCategoryTip(category, anchor){
   const items = transactions.filter(t=>t.tipo==='Saída'&&t.categoria===category&&(t.data||'').startsWith(selectedMonth));
   categoryTip.innerHTML = `<strong>${escapeHtml(category)}</strong><br>${items.map(t=>`${escapeHtml(t.descricao||'—')} · ${fmt(Number(t.valor)||0)}`).join('<br>') || 'Nenhum lançamento neste mês.'}`;
@@ -570,6 +709,7 @@ function showCategoryTip(category, anchor){
 document.addEventListener('click',e=>{ if(!e.target.closest('.catrow')&&!e.target.closest('#categoryTip')) categoryTip.hidden=true; });
 
 function render(){
+  monthHint.hidden = Boolean(firstUseMonthValue);
   populateFilters();
   const list = filteredList();
   document.getElementById('list').innerHTML = '';
@@ -602,6 +742,7 @@ function render(){
   }));
   ul.querySelectorAll('.edit').forEach(b=> b.addEventListener('click', ()=> startEdit(b.dataset.id)));
   renderCatChart(list);
+  renderBudgetChart();
   renderGeral();
   updateQuickSummary();
 }
@@ -625,18 +766,18 @@ btnCancelEdit.addEventListener('click', ()=>{
 async function addTransaction(t){
   t.id = 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
   transactions.push(t); render();
-  if(db){ try{ await db.doc('transactions/'+t.id).set(t); }catch(e){ console.error(e); } }
+  if(db && authUser){ try{ await db.doc('transactions/'+t.id).set(t); }catch(e){ console.error(e); } }
   saveLocalState();
 }
 async function updateTransaction(id, t){
   const idx = transactions.findIndex(x=>x.id===id); if(idx<0) return;
   t.id = id; transactions[idx] = t; render();
-  if(db){ try{ await db.doc('transactions/'+id).set(t); }catch(e){ console.error(e); } }
+  if(db && authUser){ try{ await db.doc('transactions/'+id).set(t); }catch(e){ console.error(e); } }
   saveLocalState();
 }
 async function removeTransaction(id){
   transactions = transactions.filter(t=>t.id!==id); render();
-  if(db){ try{ await db.doc('transactions/'+id).delete(); }catch(e){ console.error(e); } }
+  if(db && authUser){ try{ await db.doc('transactions/'+id).delete(); }catch(e){ console.error(e); } }
   saveLocalState();
 }
 
@@ -655,12 +796,12 @@ document.getElementById('form').addEventListener('submit', (e)=>{
 btnImport.addEventListener('click', ()=> fileInput.click());
 fileInput.addEventListener('change', async (e)=>{
   const file = e.target.files[0]; if(!file) return;
-  let imported = 0;
   try{
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, {type:'array', cellDates:true});
     const sheetName = wb.SheetNames.find(n => normalizeImportText(n).includes('lancamento')) || wb.SheetNames[0];
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:''});
+    pendingImport = [];
     for(const row of rows){
       const keys = Object.keys(row).reduce((acc,k)=>{acc[normalizeImportText(k)]=row[k];return acc;},{});
       const descricao = keys.descricao || keys.descricao_do_lancamento || '';
@@ -672,13 +813,21 @@ fileInput.addEventListener('change', async (e)=>{
       const categoria = String(keys.categoria || 'Outros').trim() || 'Outros';
       const forma = String(keys.forma_de_pagamento || keys.forma || 'Outro').trim() || 'Outro';
       const pagoRaw = normalizeImportText(keys.pago || keys.pago_sim_nao || 'sim');
-      await addTransaction({ descricao:String(descricao).trim(), valor:Math.abs(parsedValue), tipo:tipoImportado, categoria,
+      pendingImport.push({ descricao:String(descricao).trim(), valor:Math.abs(parsedValue), tipo:tipoImportado, categoria,
         forma, pago:pagoRaw.startsWith('n') ? 'Não' : 'Sim', data:parseImportDate(keys.data) });
-      imported++;
     }
-    showToast(imported ? `${imported} lançamento(s) importado(s) ✓` : 'Nenhum lançamento válido encontrado');
+    importSummary.textContent = `${pendingImport.length} lançamento(s) válido(s) encontrado(s). Revise antes de salvar.`;
+    importPreview.innerHTML = pendingImport.length ? `<table class="previewTable"><thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Valor</th></tr></thead><tbody>${pendingImport.slice(0,20).map(item=>`<tr><td>${escapeHtml(item.data||'—')}</td><td>${escapeHtml(item.descricao)}</td><td>${escapeHtml(item.tipo)}</td><td>${fmt(item.valor)}</td></tr>`).join('')}</tbody></table>${pendingImport.length>20?'<div class="hint">Mostrando os 20 primeiros itens.</div>':''}` : '<div class="empty">Nenhum lançamento válido encontrado.</div>';
+    btnConfirmImport.disabled = pendingImport.length===0;
+    importModal.showModal();
   }catch(err){ console.error(err); showToast('Não foi possível importar a planilha'); }
   e.target.value = '';
+});
+btnConfirmImport.addEventListener('click', async ()=>{
+  const items = pendingImport; pendingImport=[];
+  for(const item of items) await addTransaction(item);
+  importModal.close();
+  showToast(items.length ? `${items.length} lançamento(s) importado(s) ✓` : 'Nenhum lançamento importado');
 });
 
 btnExport.addEventListener('click', async ()=>{
@@ -703,10 +852,37 @@ btnExport.addEventListener('click', async ()=>{
   URL.revokeObjectURL(url);
 });
 
+function downloadFile(filename, content, type){
+  const blob = new Blob([content], {type});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = filename; link.click();
+  URL.revokeObjectURL(url);
+}
+btnBackupJson.addEventListener('click', ()=>{
+  const backup = {version:1, exportedAt:new Date().toISOString(), config, transactions, firstUseMonth:firstUseMonthValue};
+  downloadFile('meu-financeiro-backup.json', JSON.stringify(backup,null,2), 'application/json');
+  showToast('Backup JSON criado ✓');
+});
+btnRestoreJson.addEventListener('click', ()=>jsonInput.click());
+btnClearData.addEventListener('click', ()=>clearModal.showModal());
+jsonInput.addEventListener('change', async e=>{
+  const file = e.target.files[0]; if(!file) return;
+  try{
+    const backup = JSON.parse(await file.text());
+    if(!backup || !Array.isArray(backup.transactions) || !backup.config) throw new Error('Formato inválido');
+    pendingRestore = backup;
+    restoreSummary.textContent = `${backup.transactions.length} lançamento(s) e configurações da reserva encontrados no backup.`;
+    restoreModal.showModal();
+  }catch(err){ showToast('Backup JSON inválido'); }
+  e.target.value = '';
+});
+
 (async ()=>{
   try{
     loadLocalState();
-    if(typeof claude !== 'undefined' && claude.use){
+    if(firstUseMonthValue) selectedMonth = firstUseMonthValue;
+    if(typeof claude !== 'undefined' && claude.use && authUser){
       db = await claude.use('db');
       if(db){
         const cfgDoc = await db.doc('config/main').get();

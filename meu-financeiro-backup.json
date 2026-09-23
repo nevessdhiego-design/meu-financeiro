@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "exportedAt": "2026-09-23T16:48:23.177Z",
+  "config": {
+    "salario": 1985,
+    "dias": 22,
+    "vr": 30,
+    "vt": 10.8,
+    "faculdade": 500,
+    "celular": 291,
+    "parcelasRestantes": 11,
+    "cartao": 600,
+    "lazer": 600,
+    "investAlvo": 400,
+    "metaReserva": 12000,
+    "metaPatrim": 186000,
+    "reservaAtual": 108.623,
+    "patrimAtual": 0
+  },
+  "transactions": [],
+  "firstUseMonth": "2026-10"
+}
