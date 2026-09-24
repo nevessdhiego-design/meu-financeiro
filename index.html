@@ -898,5 +898,10 @@ jsonInput.addEventListener('change', async e=>{
   fillCfgForm(); render();
 })();
 </script>
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>navigator.serviceWorker.register('./sw.js').catch(error=>console.warn('Service worker indisponível',error)));
+}
+</script>
 </body>
 </html>

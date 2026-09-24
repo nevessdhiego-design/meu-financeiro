@@ -1,6 +1,8 @@
 {
   "name": "Meu Financeiro",
   "short_name": "Financeiro",
+  "id": "./",
+  "scope": "./",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#05070f",
