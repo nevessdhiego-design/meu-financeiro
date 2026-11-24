@@ -39,9 +39,9 @@ function saveLocalState(){
   catch(e){ console.warn('Não foi possível salvar os dados locais', e); }
 }
 
-function showToast(message){
+function showToast(message, ms=2200){
   toast.textContent = message; toast.classList.add('show');
-  clearTimeout(showToast.timer); showToast.timer = setTimeout(()=>toast.classList.remove('show'), 2200);
+  clearTimeout(showToast.timer); showToast.timer = setTimeout(()=>toast.classList.remove('show'), ms);
 }
 
 // ---- Categorias: ícone e cor ----
@@ -576,9 +576,11 @@ function renderImportPreview(){
   const totalOut = sum(fresh, t=>t.tipo==='Entrada' ? 0 : (Number(t.valor)||0));
   const ignoredText = importIgnored ? ` ${importIgnored} pagamento(s) de fatura ignorado(s), pois já aparecem como saída na conta.` : '';
   if(!all.length && !importIgnored){
-    importSummary.textContent = importSource && importSource.kind==='bank'
-      ? 'Não encontrei lançamentos neste arquivo. No CSV é preciso ter colunas de data, descrição e valor.'
-      : 'Nenhum lançamento válido encontrado.';
+    const p = importSource && importSource.kind==='bank' ? importSource.parsed : null;
+    importSummary.textContent = !p ? 'Nenhum lançamento válido encontrado.'
+      : p.error==='colunas'
+        ? 'Não reconheci as colunas deste CSV (preciso de data, descrição e valor).' + (p.header && p.header.length ? ` Colunas que encontrei: ${p.header.join(' | ')}. Me passe só esses nomes para eu ajustar.` : '')
+        : 'Não encontrei lançamentos neste arquivo.';
   }else if(!fresh.length){
     importSummary.textContent = (dups ? `Os ${dups} lançamento(s) deste arquivo já estão no app. Nada novo para importar.` : 'Nada novo para importar.') + ignoredText;
   }else{
@@ -600,6 +602,11 @@ fileInput.addEventListener('change', async e=>{
   try{
     const name = file.name.toLowerCase();
     const buf = await file.arrayBuffer();
+    const head = new Uint8Array(buf.slice(0,4));
+    const isPdf = head[0]===0x25 && head[1]===0x50 && head[2]===0x44 && head[3]===0x46; // %PDF
+    const isZip = head[0]===0x50 && head[1]===0x4B && !/\.(xlsx|xls)$/.test(name);
+    if(isPdf || /\.pdf$/.test(name)){ showToast('PDF não dá para ler. Exporte o extrato em OFX ou CSV', 5000); return; }
+    if(isZip || /\.zip$/.test(name)){ showToast('Este arquivo é um ZIP. Abra-o e escolha o OFX ou CSV de dentro', 5000); return; }
     if(/\.(xlsx|xls)$/.test(name)){
       importSource = {kind:'xlsx', items:readXlsx(buf)};
       importOptions.hidden = true;

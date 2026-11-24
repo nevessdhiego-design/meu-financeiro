@@ -243,9 +243,9 @@
       if (!name) return;
       if (cols.date === undefined && (name === 'date' || name.startsWith('data') || name.startsWith('dt_'))) cols.date = i;
       else if (!name.includes('saldo') && cols.amount === undefined && (name === 'amount' || name === 'value' || name === 'quantia' || name.startsWith('valor'))) cols.amount = i;
-      else if (cols.credit === undefined && (name === 'credito' || name === 'entrada' || name === 'entradas')) cols.credit = i;
-      else if (cols.debit === undefined && (name === 'debito' || name === 'saida' || name === 'saidas')) cols.debit = i;
-      else if (cols.tipo === undefined && (name === 'tipo' || name.startsWith('tipo_') || name === 'natureza')) cols.tipo = i;
+      else if (cols.credit === undefined && startsWithAny(name, ['credito', 'entrada', 'entradas'])) cols.credit = i;
+      else if (cols.debit === undefined && startsWithAny(name, ['debito', 'saida', 'saidas'])) cols.debit = i;
+      else if (cols.tipo === undefined && (name === 'tipo' || name.startsWith('tipo_') || name === 'natureza' || name === 'deb_cred' || name === 'd_c' || name === 'dc')) cols.tipo = i;
       else if (cols.category === undefined && (name === 'categoria' || name === 'category')) cols.category = i;
       else if (cols.id === undefined && (name === 'identificador' || name === 'id' || name === 'protocolo')) cols.id = i;
       else if (startsWithAny(name, DESC_COLUMNS) && !name.includes('saldo')) cols.desc.push(i);
@@ -262,7 +262,14 @@
       found = mapCsvColumns(rows[i]);
       headerIndex = i;
     }
-    if (!found) return { items: [], invertHint: false, cardHint: false, error: 'colunas' };
+    if (!found) {
+      // Só os nomes das colunas (sem valores), para o usuário poder pedir ajuste sem expor dados.
+      // Só linhas sem dígitos entram, para nunca mostrar uma linha de lançamento.
+      const candidates = rows.slice(0, 40).map((row) => row.map((c) => c.trim()).filter(Boolean))
+        .filter((cells) => cells.length >= 2 && !cells.some((c) => /\d/.test(c)));
+      const header = candidates.reduce((best, cells) => (cells.length > best.length ? cells : best), []);
+      return { items: [], invertHint: false, cardHint: false, error: 'colunas', header: header.map((c) => c.slice(0, 30)).slice(0, 12) };
+    }
     const { cols, names } = found;
     // Fatura do Nubank: date, category, title, amount; os gastos vêm positivos.
     const invertHint = names.includes('title') && names.includes('category') && names.includes('amount') && names.includes('date');
@@ -279,7 +286,7 @@
       if (cols.amount !== undefined) {
         valor = parseMoney(cell(row, cols.amount));
         const tipoText = normalizeText(cell(row, cols.tipo));
-        if (Number.isFinite(valor) && valor > 0 && /^(deb|saida|compra|pagamento)/.test(tipoText)) valor = -valor;
+        if (Number.isFinite(valor) && valor > 0 && /^(deb|saida|compra|pagamento|d$)/.test(tipoText)) valor = -valor;
       } else {
         const credit = parseMoney(cell(row, cols.credit)), debit = parseMoney(cell(row, cols.debit));
         valor = (Number.isFinite(credit) ? Math.abs(credit) : 0) - (Number.isFinite(debit) ? Math.abs(debit) : 0);

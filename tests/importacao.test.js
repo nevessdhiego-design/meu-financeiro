@@ -73,10 +73,24 @@ test('parseBankCSV reconhece fatura de cartão (gastos positivos) e colunas de c
   assert.deepEqual(s.items.map((i) => i.valor), [150, -80.25]);
 });
 
-test('parseBankCSV avisa quando não acha as colunas', () => {
+test('parseBankCSV avisa quando não acha as colunas e devolve só os nomes do cabeçalho', () => {
   const r = lib.parseBankCSV('foo;bar\n1;2\n');
   assert.equal(r.items.length, 0);
   assert.equal(r.error, 'colunas');
+  const s = lib.parseBankCSV('Extrato\nCampo A;Campo B;Campo C\n05/11/2026;Padaria;-9,90\n');
+  assert.deepEqual(s.header, ['Campo A', 'Campo B', 'Campo C']); // linhas com dígitos nunca entram
+});
+
+test('parseBankCSV aceita cabeçalhos com unidade, como "Crédito (R$)", e coluna D/C', () => {
+  const brad = 'Data;Histórico;Docto.;Crédito (R$);Débito (R$);Saldo (R$)\n'
+    + '03/11/2026;Pix recebido;123;250,00;;1.250,00\n04/11/2026;Compra Padaria;124;;18,40;1.231,60\n';
+  const r = lib.parseBankCSV(brad);
+  assert.deepEqual(r.items.map((i) => [i.descricao, i.valor]), [['Pix recebido', 250], ['Compra Padaria', -18.4]]);
+  const c6 = 'Data Lançamento,Data Contábil,Título,Descrição,Entrada(R$),Saída(R$),Saldo do Dia(R$)\n'
+    + '05/11/2026,05/11/2026,Pix,Pix enviado Fulano,0,30.00,100.00\n';
+  assert.equal(lib.parseBankCSV(c6).items[0].valor, -30);
+  const caixa = 'Data;Histórico;Valor;D/C\n06/11/2026;Compra débito;45,00;D\n07/11/2026;Depósito;100,00;C\n';
+  assert.deepEqual(lib.parseBankCSV(caixa).items.map((i) => i.valor), [-45, 100]);
 });
 
 test('parseOFX lê SGML antigo e XML de cartão', () => {
