@@ -90,3 +90,38 @@ test('daysBetween cruza meses e anos sem erro de fuso', () => {
   assert.equal(lib.daysBetween('2026-12-30', '2027-01-02'), 3);
   assert.equal(lib.daysBetween('2026-03-01', '2026-03-01'), 0);
 });
+
+test('dayLabel: Hoje, Ontem e data curta com dia da semana', () => {
+  assert.equal(lib.dayLabel('2026-11-24', '2026-11-24'), 'Hoje');
+  assert.equal(lib.dayLabel('2026-11-23', '2026-11-24'), 'Ontem');
+  assert.equal(lib.dayLabel('', '2026-11-24'), 'Sem data');
+  assert.ok(/12 de nov/.test(lib.dayLabel('2026-11-12', '2026-11-24')));
+});
+
+test('groupByDay agrupa por dia, do mais recente ao mais antigo, com saldo líquido', () => {
+  const list = [
+    { data: '2026-11-10', tipo: 'Saída', valor: 40 },
+    { data: '2026-11-12', tipo: 'Entrada', valor: 100 },
+    { data: '2026-11-10', tipo: 'Entrada', valor: 15 },
+  ];
+  const days = lib.groupByDay(list);
+  assert.deepEqual(days.map((d) => d.date), ['2026-11-12', '2026-11-10']);
+  assert.deepEqual(days.map((d) => d.items.length), [1, 2]);
+  assert.deepEqual(days.map((d) => d.net), [100, -25]);
+});
+
+test('categoryTotals soma só as saídas do mês e ordena da maior para a menor', () => {
+  const list = [
+    { data: '2026-11-02', tipo: 'Saída', categoria: 'Lazer', valor: 50 },
+    { data: '2026-11-03', tipo: 'Saída', categoria: 'Moradia', valor: 900 },
+    { data: '2026-11-05', tipo: 'Saída', categoria: 'Lazer', valor: 30 },
+    { data: '2026-11-05', tipo: 'Entrada', categoria: 'Salário', valor: 3000 },
+    { data: '2026-10-05', tipo: 'Saída', categoria: 'Lazer', valor: 999 },
+    { data: '2026-11-06', tipo: 'Saída', valor: 10 },
+  ];
+  assert.deepEqual(lib.categoryTotals(list, '2026-11'), [
+    { categoria: 'Moradia', total: 900 },
+    { categoria: 'Lazer', total: 80 },
+    { categoria: 'Outros', total: 10 },
+  ]);
+});

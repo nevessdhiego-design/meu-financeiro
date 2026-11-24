@@ -8,8 +8,8 @@
   "scope": "./",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#05070f",
-  "theme_color": "#05070f",
+  "background_color": "#f2f3f0",
+  "theme_color": "#0a3b31",
   "icons": [
     {
       "src": "./icone-financeiro-192.png",

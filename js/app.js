@@ -1,14 +1,18 @@
 /* Meu Financeiro: lógica do app (sem dependências, exceto SheetJS para planilhas).
    Os dados ficam só no navegador (localStorage). As funções puras estão em lib.js (window.FinLib). */
 const { fmt, pct, escapeHtml, pad2, todayISO, curMonth, shiftMonth, monthLabel, monthShort, normalizeImportText,
-        parseImportNumber, parseImportDate, monthlyTotals, matchesSearch, backupStatus } = FinLib;
+        parseImportNumber, parseImportDate, monthlyTotals, matchesSearch, backupStatus,
+        dayLabel, groupByDay, categoryTotals } = FinLib;
+
 let transactions = [];
 let editingId = null;
 let pendingDeleteId = null;
 let pendingImport = [];
 let pendingRestore = null;
-let firstUseMonthValue = null;
+let firstUseMonthValue = null; // mantido só para compatibilidade com backups antigos
 let selectedMonth = curMonth();
+let tipoFilter = '';
+
 // Valores iniciais fictícios: o app não traz dados reais de ninguém.
 const DEFAULT_CONFIG = {
   salario:3200, dias:22, vr:28, vt:12, faculdade:650, celular:180, parcelasRestantes:8, cartao:800,
@@ -16,6 +20,10 @@ const DEFAULT_CONFIG = {
 };
 let config = {...DEFAULT_CONFIG};
 const STORAGE_KEY = 'meu-financeiro-v1';
+
+const $ = id => document.getElementById(id);
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const sum = (list, fn) => list.reduce((total, item) => total + fn(item), 0);
 
 function loadLocalState(){
   try{
@@ -33,123 +41,148 @@ function saveLocalState(){
 
 function showToast(message){
   toast.textContent = message; toast.classList.add('show');
-  clearTimeout(showToast.timer); showToast.timer = setTimeout(()=>toast.classList.remove('show'), 2000);
+  clearTimeout(showToast.timer); showToast.timer = setTimeout(()=>toast.classList.remove('show'), 2200);
 }
+
+// ---- Categorias: ícone e cor ----
+const CATS = {
+  'Salário':['💼','#0e9f6e'], 'VR':['🍽️','#f59e0b'], 'VT':['🚌','#0ea5e9'], 'Moradia':['🏠','#8b5cf6'],
+  'Faculdade':['🎓','#6366f1'], 'Celular':['📱','#64748b'], 'Cartão':['💳','#ef4444'], 'Lazer':['🎬','#ec4899'],
+  'Investimentos':['📈','#10b981'], 'Reserva':['🛡️','#14b8a6'], 'Transporte':['🚗','#f97316'],
+  'Alimentação':['🛒','#eab308'], 'Outros':['🧾','#94a3b8']
+};
+function catMeta(category){
+  if(CATS[category]) return {emoji:CATS[category][0], color:CATS[category][1]};
+  const palette = ['#0ea5e9','#8b5cf6','#f97316','#14b8a6','#ec4899','#eab308'];
+  let hash = 0;
+  for(const ch of String(category)) hash = (hash*31 + ch.charCodeAt(0)) >>> 0;
+  return {emoji:'🧾', color:palette[hash % palette.length]};
+}
+
+// ---- Folhas e diálogos ----
+function closeOnBackdrop(dialog){
+  dialog.addEventListener('click', e=>{
+    if(e.target !== dialog) return;
+    const r = dialog.getBoundingClientRect();
+    if(e.clientX<r.left || e.clientX>r.right || e.clientY<r.top || e.clientY>r.bottom) dialog.close();
+  });
+}
+[transactionModal, moreSheet, reservaModal, deleteModal, clearModal, restoreModal].forEach(closeOnBackdrop);
+
+// ---- Navegação ----
+function goTab(name){
+  document.querySelectorAll('.navBtn[data-tab]').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active', v.id==='view-'+name));
+  window.scrollTo({top:0});
+}
+document.querySelectorAll('.navBtn[data-tab]').forEach(b=>b.addEventListener('click', ()=>goTab(b.dataset.tab)));
+linkAllTx.addEventListener('click', ()=>goTab('lanc'));
+
+function setMonth(month){
+  if(!month) return;
+  selectedMonth = month;
+  controlMes.value = month;
+  populateFilters();
+  fMes.value = month;
+  render();
+}
+btnPrevMonth.addEventListener('click', ()=>setMonth(shiftMonth(selectedMonth,-1)));
+btnNextMonth.addEventListener('click', ()=>setMonth(shiftMonth(selectedMonth,1)));
+controlMes.addEventListener('change', ()=>setMonth(controlMes.value));
+controlMes.addEventListener('click', ()=>{ try{ controlMes.showPicker && controlMes.showPicker(); }catch(e){} });
+
+// ---- Lançamento: criar, editar, excluir ----
+function setTipo(value){
+  tipo.value = value;
+  segTipo.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.v===value));
+}
+const DEFAULT_CAT = {'Saída':'Alimentação', 'Entrada':'Salário'};
+segTipo.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{
+  const other = b.dataset.v==='Entrada' ? 'Saída' : 'Entrada';
+  if(!editingId && categoria.value===DEFAULT_CAT[other]) categoria.value = DEFAULT_CAT[b.dataset.v];
+  setTipo(b.dataset.v);
+}));
+
+function openForm(){
+  editingId = null; form.reset(); setTipo('Saída'); categoria.value = DEFAULT_CAT['Saída']; pago.value = 'Sim'; data.value = todayISO();
+  modalTitle.textContent = 'Novo lançamento'; btnSubmit.textContent = 'Salvar lançamento'; btnDeleteTx.hidden = true;
+  transactionModal.showModal();
+  setTimeout(()=>valor.focus(), 60);
+}
+btnOpenForm.addEventListener('click', openForm);
+btnWelcomeAdd.addEventListener('click', openForm);
+btnCloseForm.addEventListener('click', ()=>transactionModal.close());
+
+function startEdit(id){
+  const t = transactions.find(x=>x.id===id); if(!t) return;
+  editingId = id;
+  data.value = t.data||'';
+  setTipo(t.tipo==='Entrada' ? 'Entrada' : 'Saída');
+  categoria.value = t.categoria; desc.value = t.descricao;
+  valor.value = t.valor; forma.value = t.forma; pago.value = t.pago;
+  btnSubmit.textContent = 'Salvar alterações'; btnDeleteTx.hidden = false;
+  modalTitle.textContent = 'Editar lançamento'; transactionModal.showModal();
+}
+btnDeleteTx.addEventListener('click', ()=>{
+  if(!editingId) return;
+  pendingDeleteId = editingId;
+  transactionModal.close();
+  deleteModal.showModal();
+});
+btnCancelDelete.addEventListener('click', ()=>{ pendingDeleteId = null; deleteModal.close(); });
+btnConfirmDelete.addEventListener('click', ()=>{
+  if(!pendingDeleteId) return;
+  const id = pendingDeleteId; pendingDeleteId = null; deleteModal.close();
+  removeTransaction(id); showToast('Lançamento excluído');
+});
+
+function addTransaction(t){
+  t.id = 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
+  transactions.push(t); saveLocalState(); render();
+}
+function updateTransaction(id, t){
+  const idx = transactions.findIndex(x=>x.id===id); if(idx<0) return;
+  t.id = id; transactions[idx] = t; saveLocalState(); render();
+}
+function removeTransaction(id){
+  transactions = transactions.filter(t=>t.id!==id); saveLocalState(); render();
+}
+
+form.addEventListener('submit', e=>{
+  e.preventDefault();
+  const d = desc.value.trim(); const v = parseFloat(valor.value);
+  if(!d || isNaN(v)) return;
+  const payload = { descricao:d, valor:v, tipo:tipo.value, categoria:categoria.value, forma:forma.value,
+    pago:pago.value, data: data.value || todayISO() };
+  if(editingId){ updateTransaction(editingId, payload); editingId = null; showToast('Lançamento atualizado ✓'); }
+  else { addTransaction(payload); showToast('Lançamento salvo ✓'); }
+  transactionModal.close();
+});
+
+// ---- Reserva ----
 function showReservaModal(){
   const falta = Math.max(config.metaReserva-config.reservaAtual,0);
   const rawPct = config.metaReserva>0 ? config.reservaAtual/config.metaReserva : 0;
   const meses = config.investAlvo>0 ? Math.ceil(falta/config.investAlvo) : null;
   reservaModalValue.textContent = fmt(config.reservaAtual);
-  reservaModalMeta.textContent = `de ${fmt(config.metaReserva)} · meta · ${pct(Math.min(rawPct,1))}`;
+  reservaModalMeta.textContent = `de ${fmt(config.metaReserva)} · ${pct(Math.min(rawPct,1))} da meta`;
   reservaModalBar.style.width = `${Math.min(rawPct,1)*100}%`;
   reservaModalBar.classList.toggle('achieved',rawPct>=1);
   reservaModalExtra.textContent = falta>0
-    ? `faltam ${fmt(falta)} · no ritmo atual (${fmt(config.investAlvo)}/mês) isso leva ~${meses} meses`
-    : 'Meta atingida';
+    ? (meses ? `Faltam ${fmt(falta)}. No ritmo atual (${fmt(config.investAlvo)}/mês), isso leva cerca de ${meses} ${meses===1?'mês':'meses'}.` : `Faltam ${fmt(falta)}.`)
+    : 'Meta atingida 🎉';
   reservaModal.showModal();
 }
-function updateQuickSummary(){
-  const month = selectedMonth;
-  const monthTotals = transactions.filter(t=>(t.data||'').startsWith(month)).reduce((totals,t)=>{
-    const value = Number(t.valor)||0;
-    if(t.tipo==='Entrada') totals.entradas += value; else totals.saidas += value;
-    return totals;
-  },{entradas:0,saidas:0});
-  quickSaldo.textContent = fmt(monthTotals.entradas-monthTotals.saidas);
-  quickReserva.textContent = fmt(config.reservaAtual);
-  quickReservaPct.textContent = pct(config.metaReserva>0 ? Math.min(config.reservaAtual/config.metaReserva,1) : 0);
-}
-
-btnOpenForm.addEventListener('click', ()=>{
-  editingId = null; form.reset(); tipo.value='Entrada'; pago.value='Sim';
-  modalTitle.textContent='Novo lançamento'; btnSubmit.textContent='Adicionar lançamento'; btnCancelEdit.style.display='none';
-  transactionModal.showModal();
-});
-btnCloseForm.addEventListener('click', ()=>transactionModal.close());
-transactionModal.addEventListener('click', e=>{ if(e.target===transactionModal) transactionModal.close(); });
-reservaCard.addEventListener('keydown', e=>{ if(e.key==='Enter' || e.key===' ') { e.preventDefault(); showReservaModal(); } });
+reservaCard.addEventListener('click', showReservaModal);
+btnCloseReserva.addEventListener('click', ()=>reservaModal.close());
 btnUpdateReserva.addEventListener('click', ()=>{
   reservaModal.close();
-  document.querySelector('details').open = true;
-  cfgReservaAtual.focus();
-  cfgReservaAtual.select();
+  goTab('plan');
+  cfgReservaAtual.focus(); cfgReservaAtual.select();
   cfgReservaAtual.scrollIntoView({behavior:'smooth',block:'center'});
 });
-quickFab.addEventListener('click', ()=>{ updateQuickSummary(); quickModal.showModal(); });
-quickModal.addEventListener('click', e=>{ if(e.target===quickModal) quickModal.close(); });
-controlMes.value = selectedMonth;
-controlMes.addEventListener('change', ()=>{
-  if(!controlMes.value) return;
-  selectedMonth = controlMes.value;
-  fMes.value = selectedMonth;
-  render();
-});
-btnChooseMonth.addEventListener('click', ()=>{
-  firstUseMonth.value = firstUseMonthValue || selectedMonth;
-  monthModal.showModal();
-});
-btnCloseMonth.addEventListener('click', ()=>monthModal.close());
-monthForm.addEventListener('submit', e=>{
-  e.preventDefault();
-  if(!firstUseMonth.value) return;
-  firstUseMonthValue = firstUseMonth.value;
-  selectedMonth = firstUseMonth.value;
-  controlMes.value = selectedMonth;
-  saveLocalState();
-  monthHint.hidden = true;
-  monthModal.close();
-  render();
-  showToast('Mês inicial salvo ✓');
-});
-btnCloseImport.addEventListener('click', ()=>importModal.close());
-btnCancelImport.addEventListener('click', ()=>{ pendingImport=[]; importModal.close(); });
-btnCancelClear.addEventListener('click', ()=>clearModal.close());
-btnConfirmClear.addEventListener('click', ()=>{
-  transactions = [];
-  saveLocalState();
-  clearModal.close();
-  render();
-  showToast('Lançamentos limpos ✓');
-});
-btnCancelRestore.addEventListener('click', ()=>{ pendingRestore=null; restoreModal.close(); });
-btnConfirmRestore.addEventListener('click', ()=>{
-  if(!pendingRestore) return;
-  config = {...config, ...pendingRestore.config};
-  transactions = pendingRestore.transactions;
-  if(pendingRestore.firstUseMonth) firstUseMonthValue = pendingRestore.firstUseMonth;
-  saveLocalState();
-  pendingRestore = null;
-  restoreModal.close();
-  fillCfgForm();
-  render();
-  showToast('Backup restaurado ✓');
-});
-quickCurrentMonth.addEventListener('click', ()=>{
-  fMes.value = selectedMonth; fCategoria.value = ''; fTipo.value = ''; fBusca.value = ''; render();
-});
-quickExpenses.addEventListener('click', ()=>{
-  fMes.value = selectedMonth; fCategoria.value = ''; fTipo.value = 'Saída'; fBusca.value = ''; render();
-});
-quickClearFilters.addEventListener('click', ()=>{
-  fMes.value = ''; fCategoria.value = ''; fTipo.value = ''; fBusca.value = ''; render();
-});
-btnCancelDelete.addEventListener('click', ()=>deleteModal.close());
-deleteModal.addEventListener('click', e=>{ if(e.target===deleteModal) deleteModal.close(); });
-btnConfirmDelete.addEventListener('click', async ()=>{
-  if(!pendingDeleteId) return;
-  const id = pendingDeleteId; pendingDeleteId = null; deleteModal.close();
-  await removeTransaction(id); showToast('Lançamento excluído');
-});
 
-document.querySelectorAll('.tab').forEach(t=>{
-  t.addEventListener('click', ()=>{
-    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-    document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
-    t.classList.add('active');
-    document.getElementById('view-'+t.dataset.tab).classList.add('active');
-  });
-});
-
+// ---- Configurações (aba Planejar) ----
 function fillCfgForm(){
   cfgSalario.value=config.salario; cfgDias.value=config.dias; cfgVr.value=config.vr; cfgVt.value=config.vt;
   cfgFaculdade.value=config.faculdade; cfgCelular.value=config.celular; cfgParcelasRestantes.value=config.parcelasRestantes;
@@ -157,60 +190,229 @@ function fillCfgForm(){
   cfgMetaReserva.value=config.metaReserva; cfgMetaPatrim.value=config.metaPatrim;
   cfgReservaAtual.value=config.reservaAtual; cfgPatrimAtual.value=config.patrimAtual;
 }
+btnSaveCfg.addEventListener('click', ()=>{
+  const n = el => parseFloat(el.value)||0;
+  config = {
+    salario:n(cfgSalario), dias:n(cfgDias), vr:n(cfgVr), vt:n(cfgVt), faculdade:n(cfgFaculdade), celular:n(cfgCelular),
+    parcelasRestantes:n(cfgParcelasRestantes), cartao:n(cfgCartao), lazer:n(cfgLazer), investAlvo:n(cfgInvestAlvo),
+    metaReserva:n(cfgMetaReserva), metaPatrim:n(cfgMetaPatrim), reservaAtual:n(cfgReservaAtual), patrimAtual:n(cfgPatrimAtual)
+  };
+  saveLocalState(); render();
+  showToast('Alterações salvas ✓');
+});
 
-function gastosPorCategoria(list, tipo){
-  const m = {};
-  for(const t of list){ if(t.tipo!==tipo) continue; m[t.categoria]=(m[t.categoria]||0)+(Number(t.valor)||0); }
-  return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+// ---- Início ----
+function setRing(ringEl, textEl, ratio){
+  const p = Math.min(Math.max(ratio,0),1);
+  ringEl.setAttribute('stroke-dasharray', `${(p*100).toFixed(2)} 100`);
+  ringEl.classList.toggle('done', ratio>=1);
+  textEl.textContent = pct(p);
+}
+
+function renderSaldoChart(list){
+  const line = $('saldoChartLine'), area = $('saldoChartArea');
+  const ordered = [...list].sort((a,b)=> (a.data||'').localeCompare(b.data||''));
+  if(!ordered.length){
+    line.setAttribute('d','M0 22 L100 22');
+    area.setAttribute('d','M0 22 L100 22 L100 44 L0 44 Z');
+    return;
+  }
+  let balance = 0;
+  const points = [{x:0,value:0}];
+  ordered.forEach((t,index)=>{
+    const amount = Number(t.valor)||0;
+    balance += t.tipo==='Entrada' ? amount : -amount;
+    points.push({x:(index+1)/(ordered.length)*100,value:balance});
+  });
+  const values = points.map(p=>p.value);
+  const min = Math.min(...values), max = Math.max(...values);
+  const spread = max-min || Math.max(Math.abs(max),1);
+  const lower = min-spread*.12, upper = max+spread*.12;
+  const toY = v => 38-((v-lower)/(upper-lower))*32;
+  const path = points.map((p,i)=>`${i===0?'M':'L'}${p.x.toFixed(2)} ${toY(p.value).toFixed(2)}`).join(' ');
+  line.setAttribute('d',path);
+  area.setAttribute('d',`${path} L100 44 L0 44 Z`);
 }
 
 function renderGeral(){
+  const monthList = transactions.filter(t=>(t.data||'').startsWith(selectedMonth));
+  const entradas = sum(monthList, t=>t.tipo==='Entrada' ? (Number(t.valor)||0) : 0);
+  const saidas = sum(monthList, t=>t.tipo==='Entrada' ? 0 : (Number(t.valor)||0));
+  heroMonth.textContent = monthLabel(selectedMonth);
+  hSaldo.textContent = fmt(entradas-saidas);
+  hEntradas.textContent = fmt(entradas); hSaidas.textContent = fmt(saidas);
+  heroPill.textContent = entradas>0
+    ? (saidas>entradas ? 'Saídas acima das entradas' : `${pct(saidas/entradas)} das entradas gastas`)
+    : (saidas>0 ? 'Sem entradas neste mês' : '');
+  renderSaldoChart(monthList);
+
   const recursos = config.salario + config.vr*config.dias + config.vt*config.dias;
   const despesas = config.faculdade + config.celular + config.cartao + config.lazer + config.investAlvo;
-  document.getElementById('vRecursos').textContent = fmt(recursos);
-  document.getElementById('vDespesas').textContent = fmt(despesas);
-  document.getElementById('vSaldoPlan').textContent = fmt(recursos-despesas);
+  vRecursos.textContent = fmt(recursos);
+  vDespesas.textContent = fmt(despesas);
+  vSaldoPlan.textContent = fmt(recursos-despesas);
 
   const rRaw = config.metaReserva>0 ? config.reservaAtual/config.metaReserva : 0;
-  const rPct = Math.min(rRaw,1);
-  gReservaPct.textContent = pct(rPct); gReservaBar.style.width=(rPct*100)+'%';
-  gReservaBar.classList.toggle('achieved',rRaw>=1);
-  gReservaInfo.textContent = `${fmt(config.reservaAtual)} de ${fmt(config.metaReserva)} · faltam ${fmt(Math.max(config.metaReserva-config.reservaAtual,0))}`;
-
+  setRing(gReservaRing, gReservaPct, rRaw);
+  gReservaInfo.textContent = `${fmt(config.reservaAtual)} de ${fmt(config.metaReserva)}`;
   const pRaw = config.metaPatrim>0 ? config.patrimAtual/config.metaPatrim : 0;
-  const pPct = Math.min(pRaw,1);
-  gPatrimPct.textContent = pct(pPct); gPatrimBar.style.width=(pPct*100)+'%';
-  gPatrimBar.classList.toggle('achieved',pRaw>=1);
-  gPatrimInfo.textContent = `${fmt(config.patrimAtual)} de ${fmt(config.metaPatrim)} · faltam ${fmt(Math.max(config.metaPatrim-config.patrimAtual,0))}`;
+  setRing(gPatrimRing, gPatrimPct, pRaw);
+  gPatrimInfo.textContent = `${fmt(config.patrimAtual)} de ${fmt(config.metaPatrim)}`;
 
-  const cm = selectedMonth;
-  const cartaoGasto = transactions.filter(t=>t.tipo==='Saída'&&t.forma==='Crédito'&&(t.data||'').startsWith(cm)).reduce((s,t)=>s+(Number(t.valor)||0),0);
+  const cartaoGasto = sum(monthList, t=>(t.tipo==='Saída' && t.forma==='Crédito') ? (Number(t.valor)||0) : 0);
   const cPct = config.cartao>0 ? Math.min(cartaoGasto/config.cartao,1) : 0;
   gCartaoPct.textContent = pct(cPct);
-  gCartaoBar.style.width=(cPct*100)+'%';
+  gCartaoBar.style.width = (cPct*100)+'%';
   gCartaoBar.className = cPct>=1 ? 'negfill' : (cPct>=0.9 ? 'warnfill' : '');
-  gCartaoInfo.textContent = `${fmt(cartaoGasto)} de ${fmt(config.cartao)}` + (cPct>=0.9?' · perto do teto':'');
+  gCartaoInfo.textContent = `${fmt(cartaoGasto)} de ${fmt(config.cartao)}` + (cPct>=0.9 && cPct<1 ? ' · perto do teto' : cPct>=1 ? ' · teto atingido' : '');
+  cartaoMesLabel.textContent = monthLabel(selectedMonth).split(' de ')[0];
 
-  gParcelas.textContent = config.parcelasRestantes + ' restante(s)';
-  gParcelasInfo.textContent = config.parcelasRestantes>0 ? `~${fmt(config.celular*config.parcelasRestantes)} ainda a pagar (R$ ${config.celular.toLocaleString('pt-BR')}/mês)` : 'Celular quitado';
+  gParcelas.textContent = config.parcelasRestantes>0 ? `${config.parcelasRestantes} restante${config.parcelasRestantes===1?'':'s'}` : 'Quitado';
+  gParcelasInfo.textContent = config.parcelasRestantes>0
+    ? `Cerca de ${fmt(config.celular*config.parcelasRestantes)} a pagar (${fmt(config.celular)} por mês)` : 'Celular quitado';
 
-  cartaoMesLabel.textContent = monthLabel(cm);
+  renderCategories();
+  renderRecent(monthList);
+  welcomeCard.hidden = transactions.length>0;
 }
 
-btnSaveCfg.addEventListener('click', async ()=>{
-  config = {
-    salario:parseFloat(cfgSalario.value)||0, dias:parseFloat(cfgDias.value)||0, vr:parseFloat(cfgVr.value)||0,
-    vt:parseFloat(cfgVt.value)||0, faculdade:parseFloat(cfgFaculdade.value)||0, celular:parseFloat(cfgCelular.value)||0,
-    parcelasRestantes:parseFloat(cfgParcelasRestantes.value)||0, cartao:parseFloat(cfgCartao.value)||0,
-    lazer:parseFloat(cfgLazer.value)||0, investAlvo:parseFloat(cfgInvestAlvo.value)||0,
-    metaReserva:parseFloat(cfgMetaReserva.value)||0, metaPatrim:parseFloat(cfgMetaPatrim.value)||0,
-    reservaAtual:parseFloat(cfgReservaAtual.value)||0, patrimAtual:parseFloat(cfgPatrimAtual.value)||0
-  };
-  renderGeral();
-  showToast('Configurações salvas ✓');
-  saveLocalState();
-  if(reservaModal.open) reservaModal.close();
+function renderCategories(){
+  const rows = categoryTotals(transactions, selectedMonth);
+  if(!rows.length){
+    catStack.innerHTML = '';
+    catList.innerHTML = `<div class="empty">Nenhuma saída em ${escapeHtml(monthLabel(selectedMonth))}.</div>`;
+    return;
+  }
+  const total = sum(rows, r=>r.total);
+  catStack.innerHTML = rows.map(r=>`<i style="flex:${r.total};--c:${catMeta(r.categoria).color}"></i>`).join('');
+  catList.innerHTML = rows.slice(0,8).map(r=>{
+    const m = catMeta(r.categoria);
+    return `<button type="button" class="catRow" data-category="${escapeHtml(r.categoria)}" style="--c:${m.color}">`
+      + `<span class="catIcon" aria-hidden="true">${m.emoji}</span>`
+      + `<span class="catName">${escapeHtml(r.categoria)}<small>${pct(r.total/total)} das saídas</small></span>`
+      + `<span class="catAmt money">${fmt(r.total)}</span></button>`;
+  }).join('');
+}
+catList.addEventListener('click', e=>{
+  const row = e.target.closest('.catRow'); if(!row) return;
+  fMes.value = selectedMonth; fCategoria.value = row.dataset.category; fBusca.value = '';
+  setTipoFilter('Saída'); goTab('lanc');
 });
+
+function txItem(t){
+  const m = catMeta(t.categoria);
+  const entrada = t.tipo==='Entrada';
+  return `<button type="button" class="tx" data-id="${escapeHtml(t.id)}" style="--c:${m.color}">`
+    + `<span class="txIcon" aria-hidden="true">${m.emoji}</span>`
+    + `<span class="txBody"><span class="txDesc">${escapeHtml(t.descricao||'')}</span>`
+    + `<span class="txMeta">${escapeHtml(t.categoria||'—')}${t.forma ? ' · '+escapeHtml(t.forma) : ''}${t.pago==='Não' ? '<em class="badge">Não pago</em>' : ''}</span></span>`
+    + `<span class="txVal money ${entrada?'pos':''}">${entrada?'+':'−'} ${fmt(Math.abs(Number(t.valor)||0))}</span></button>`;
+}
+function sortRecentFirst(list){
+  return list.map((t,i)=>[t,i]).sort((a,b)=> (b[0].data||'').localeCompare(a[0].data||'') || b[1]-a[1]).map(x=>x[0]);
+}
+function renderRecent(monthList){
+  const items = sortRecentFirst(monthList).slice(0,5);
+  recentList.innerHTML = items.length
+    ? `<div class="txGroup">${items.map(txItem).join('')}</div>`
+    : `<div class="empty">Nenhum lançamento em ${escapeHtml(monthLabel(selectedMonth))}.</div>`;
+}
+[recentList, list].forEach(container=>container.addEventListener('click', e=>{
+  const row = e.target.closest('.tx'); if(row) startEdit(row.dataset.id);
+}));
+
+// ---- Evolução dos últimos 6 meses ----
+function renderEvolution(){
+  const rows = monthlyTotals(transactions, selectedMonth, 6);
+  if(rows.every(d=>!d.entradas && !d.saidas)){
+    evoChart.innerHTML = '<div class="empty">Sem lançamentos nos últimos 6 meses.</div>'; return;
+  }
+  const W = 300, H = 130, top = 8, plotH = H - top - 22, slot = W / rows.length, bw = slot * 0.3;
+  const max = Math.max(1, ...rows.flatMap(d=>[d.entradas, d.saidas]));
+  const bars = rows.map((d,i)=>{
+    const x0 = i*slot + slot/2, he = d.entradas/max*plotH, hs = d.saidas/max*plotH;
+    return `<g class="${d.month===selectedMonth?'evoCur':''}"><title>${escapeHtml(monthLabel(d.month))}: entradas ${fmt(d.entradas)}, saídas ${fmt(d.saidas)}</title>`
+      + `<rect class="evoIn" x="${x0-bw-1}" y="${top+plotH-he}" width="${bw}" height="${Math.max(he,he>0?2:0)}" rx="3"/>`
+      + `<rect class="evoOut" x="${x0+1}" y="${top+plotH-hs}" width="${bw}" height="${Math.max(hs,hs>0?2:0)}" rx="3"/>`
+      + `<text x="${x0}" y="${H-6}" text-anchor="middle">${escapeHtml(monthShort(d.month))}</text></g>`;
+  }).join('');
+  evoChart.innerHTML = `<svg class="evoSvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Entradas e saídas dos últimos 6 meses">`
+    + `<line class="evoBase" x1="0" x2="${W}" y1="${top+plotH}" y2="${top+plotH}"/>${bars}</svg>`
+    + '<div class="evoLegend"><span><i class="evoIn"></i>Entradas</span><span><i class="evoOut"></i>Saídas</span></div>';
+}
+
+// ---- Lançamentos: filtros e lista ----
+function populateFilters(){
+  const months = [...new Set([...transactions.map(t=>(t.data||'').slice(0,7)).filter(Boolean),selectedMonth])].sort().reverse();
+  const curMes = fMes.value;
+  fMes.innerHTML = '<option value="">Todos os meses</option>' + months.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(cap(monthShort(m))+' '+m.slice(0,4))}</option>`).join('');
+  if(months.includes(curMes)) fMes.value = curMes;
+  const cats = [...new Set(transactions.map(t=>t.categoria).filter(Boolean))].sort();
+  const curCat = fCategoria.value;
+  fCategoria.innerHTML = '<option value="">Todas categorias</option>' + cats.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  if(cats.includes(curCat)) fCategoria.value = curCat;
+}
+function filteredList(){
+  return transactions.filter(t=>
+    (!fMes.value || (t.data||'').startsWith(fMes.value)) &&
+    (!fCategoria.value || t.categoria===fCategoria.value) &&
+    (!tipoFilter || t.tipo===tipoFilter) &&
+    matchesSearch(t, fBusca.value)
+  );
+}
+function setTipoFilter(value){
+  tipoFilter = value;
+  tipoChips.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.tipo===value));
+}
+tipoChips.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{ setTipoFilter(b.dataset.tipo); render(); }));
+[fMes,fCategoria].forEach(el=>el.addEventListener('change', render));
+fBusca.addEventListener('input', render);
+quickClearFilters.addEventListener('click', ()=>{
+  fMes.value = selectedMonth; fCategoria.value = ''; fBusca.value = ''; setTipoFilter(''); render();
+});
+
+function renderLancamentos(){
+  const filtered = filteredList();
+  let entradas = 0, saidas = 0, naoPago = 0;
+  for(const t of filtered){
+    const v = Number(t.valor)||0;
+    if(t.tipo==='Entrada') entradas += v; else saidas += v;
+    if(t.pago==='Não') naoPago++;
+  }
+  vSaldo.textContent = fmt(entradas-saidas); vEntradas.textContent = fmt(entradas); vSaidas.textContent = fmt(saidas);
+  pendMsg.hidden = naoPago===0;
+  if(naoPago>0) pendMsg.innerHTML = `<b>${naoPago}</b> lançamento${naoPago===1?'':'s'} marcado${naoPago===1?'':'s'} como "Não pago"`;
+
+  const today = todayISO();
+  const days = groupByDay(sortRecentFirst(filtered));
+  list.innerHTML = days.map(day=>
+    `<section class="dayGroup"><header class="dayHead"><span>${escapeHtml(dayLabel(day.date, today))}</span><span class="money">${fmt(day.net)}</span></header>`
+    + `<div class="txGroup">${day.items.map(txItem).join('')}</div></section>`
+  ).join('');
+  emptyMsg.hidden = filtered.length>0;
+  quickClearFilters.hidden = !(fCategoria.value || tipoFilter || fBusca.value || fMes.value!==selectedMonth);
+}
+
+// ---- Planejar: orçamento restante ----
+function renderBudgetChart(){
+  const targets = {Faculdade:config.faculdade, Celular:config.celular, Cartão:config.cartao, Lazer:config.lazer, Investimentos:config.investAlvo};
+  const spent = {};
+  transactions.filter(t=>t.tipo==='Saída'&&(t.data||'').startsWith(selectedMonth)).forEach(t=>{
+    spent[t.categoria] = (spent[t.categoria]||0) + (Number(t.valor)||0);
+  });
+  budgetChart.innerHTML = Object.entries(targets).map(([category,target])=>{
+    const used = spent[category]||0;
+    const ratio = target>0 ? used/target : 0;
+    const remaining = target-used;
+    const over = remaining<0, done = !over && target>0 && remaining===0, near = !over && !done && ratio>=0.9;
+    const state = over ? 'over' : near ? 'near' : '';
+    const fillCls = over ? 'overfill' : near ? 'warnfill' : done ? 'achieved' : '';
+    const text = over ? `excedeu ${fmt(Math.abs(remaining))}` : done ? 'no valor planejado' : `restam ${fmt(remaining)}`;
+    return `<div class="budgetRow"><div class="budgetHead"><span>${escapeHtml(category)}<em class="money">${fmt(used)} de ${fmt(target)}</em></span>`
+      + `<small class="money ${state}">${text}</small></div>`
+      + `<div class="bar"><div class="${fillCls}" style="width:${Math.min(ratio,1)*100}%"></div></div></div>`;
+  }).join('');
+}
 
 // ---- Dados de exemplo (100% fictícios) ----
 const SAMPLE_PREFIX = 'demo_';
@@ -238,13 +440,13 @@ function loadSampleData(){
   const month = curMonth();
   transactions = [...buildSampleTransactions(shiftMonth(month,-1)), ...buildSampleTransactions(month)];
   firstUseMonthValue = shiftMonth(month,-1);
-  selectedMonth = month; controlMes.value = month;
-  saveLocalState(); render();
+  saveLocalState(); setMonth(month);
 }
+btnWelcomeSample.addEventListener('click', ()=>{ loadSampleData(); showToast('Dados de exemplo carregados ✓'); });
 btnSample.addEventListener('click', ()=>{
+  moreSheet.close();
   if(transactions.length){ showToast('Já existem lançamentos. Limpe-os antes de carregar o exemplo.'); return; }
   loadSampleData();
-  document.querySelector('.dataMenu').open = false;
   showToast('Dados de exemplo carregados ✓');
 });
 btnExitDemo.addEventListener('click', ()=>{
@@ -258,11 +460,12 @@ const LAST_BACKUP_KEY = 'meu-financeiro-last-backup';
 function lastBackup(){ try{ return localStorage.getItem(LAST_BACKUP_KEY); }catch(e){ return null; } }
 function updateBackupChip(){
   const s = backupStatus(lastBackup(), transactions.length>0, todayISO());
-  btnBackupChip.hidden = s.level==='vazio' || hasSampleData();
-  btnBackupChip.dataset.level = s.level;
-  btnBackupChip.textContent = s.level==='nunca' ? '💾 Sem backup ainda'
-    : s.level==='atrasado' ? `💾 Backup há ${s.days} dias`
-    : s.days===0 ? '💾 Backup de hoje' : `💾 Backup há ${s.days} dia(s)`;
+  const attention = (s.level==='nunca' || s.level==='atrasado') && !hasSampleData();
+  backupNotice.hidden = !attention;
+  backupNoticeText.textContent = s.level==='nunca' ? 'Você ainda não fez backup dos seus dados.' : `Seu último backup foi há ${s.days} dias.`;
+  backupSub.textContent = s.level==='nunca' ? 'Nenhum backup feito ainda'
+    : s.level==='vazio' ? 'Salva um arquivo JSON (Arquivos, iCloud)'
+    : s.days===0 ? 'Último backup: hoje' : `Último backup: há ${s.days} dia${s.days===1?'':'s'}`;
 }
 async function doBackup(){
   const backup = {version:1, exportedAt:new Date().toISOString(), config, transactions, firstUseMonth:firstUseMonthValue};
@@ -284,241 +487,55 @@ async function doBackup(){
   updateBackupChip();
   showToast('Backup criado ✓');
 }
-
-// ---- Modo privacidade: borra os valores na tela ----
-const PRIVACY_KEY = 'meu-financeiro-privacy';
-function applyPrivacy(on){
-  document.body.classList.toggle('privacy', on);
-  btnPrivacy.setAttribute('aria-pressed', String(on));
-  btnPrivacy.textContent = on ? '🙈 Valores ocultos' : '👁 Ocultar valores';
+function downloadFile(filename, content, type){
+  const blob = new Blob([content], {type});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = filename; link.click();
+  URL.revokeObjectURL(url);
 }
-btnPrivacy.addEventListener('click', ()=>{
-  const on = !document.body.classList.contains('privacy');
-  try{ localStorage.setItem(PRIVACY_KEY, on ? '1' : '0'); }catch(e){}
-  applyPrivacy(on);
+btnBackupJson.addEventListener('click', ()=>{ moreSheet.close(); doBackup(); });
+btnBackupChip.addEventListener('click', doBackup);
+btnRestoreJson.addEventListener('click', ()=>{ moreSheet.close(); jsonInput.click(); });
+jsonInput.addEventListener('change', async e=>{
+  const file = e.target.files[0]; if(!file) return;
+  try{
+    const backup = JSON.parse(await file.text());
+    if(!backup || !Array.isArray(backup.transactions) || !backup.config) throw new Error('Formato inválido');
+    pendingRestore = backup;
+    restoreSummary.textContent = `${backup.transactions.length} lançamento(s) e as configurações foram encontrados no backup. Os dados atuais serão substituídos.`;
+    restoreModal.showModal();
+  }catch(err){ showToast('Backup JSON inválido'); }
+  e.target.value = '';
 });
-
-// ---- Evolução dos últimos 6 meses ----
-function renderEvolution(){
-  const data = monthlyTotals(transactions, selectedMonth, 6);
-  if(data.every(d=>!d.entradas && !d.saidas)){
-    evoChart.innerHTML = '<div class="empty">Sem lançamentos nos últimos 6 meses.</div>'; return;
-  }
-  const W = 300, H = 120, top = 8, plotH = H - top - 22, slot = W / data.length, bw = slot * 0.3;
-  const max = Math.max(1, ...data.flatMap(d=>[d.entradas, d.saidas]));
-  const bars = data.map((d,i)=>{
-    const x0 = i*slot + slot/2, he = d.entradas/max*plotH, hs = d.saidas/max*plotH;
-    return `<g><title>${escapeHtml(monthLabel(d.month))}: entradas ${fmt(d.entradas)}, saídas ${fmt(d.saidas)}</title>`
-      + `<rect class="evoIn" x="${x0-bw-1}" y="${top+plotH-he}" width="${bw}" height="${he}" rx="2"/>`
-      + `<rect class="evoOut" x="${x0+1}" y="${top+plotH-hs}" width="${bw}" height="${hs}" rx="2"/>`
-      + `<text x="${x0}" y="${H-6}" text-anchor="middle">${escapeHtml(monthShort(d.month))}</text></g>`;
-  }).join('');
-  evoChart.innerHTML = `<svg class="evoSvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Entradas e saídas dos últimos 6 meses">${bars}</svg>`
-    + '<div class="evoLegend"><span><i class="evoIn"></i>Entradas</span><span><i class="evoOut"></i>Saídas</span></div>';
-}
-
-// ---- Aviso de instalação no iPhone (Safari fora da tela de início) ----
-const IOS_HINT_KEY = 'meu-financeiro-ios-hint';
-function isIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1); }
-function isStandalone(){ return navigator.standalone===true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches); }
-function maybeShowIosHint(forced){
-  let dismissed = false; try{ dismissed = localStorage.getItem(IOS_HINT_KEY)==='1'; }catch(e){}
-  iosHint.hidden = !(forced || (isIOS() && !isStandalone() && !dismissed));
-}
-btnIosHintClose.addEventListener('click', ()=>{
-  try{ localStorage.setItem(IOS_HINT_KEY, '1'); }catch(e){}
-  iosHint.hidden = true;
-});
-
-// ---- Filtros ----
-function populateFilters(){
-  const months = [...new Set([...transactions.map(t=>(t.data||'').slice(0,7)).filter(Boolean),selectedMonth])].sort().reverse();
-  const curMes = fMes.value;
-  fMes.innerHTML = '<option value="">Todos os meses</option>' + months.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join('');
-  if(months.includes(curMes)) fMes.value = curMes;
-  const cats = [...new Set(transactions.map(t=>t.categoria).filter(Boolean))].sort();
-  const curCat = fCategoria.value;
-  fCategoria.innerHTML = '<option value="">Todas categorias</option>' + cats.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  if(cats.includes(curCat)) fCategoria.value = curCat;
-}
-function filteredList(){
-  return transactions.filter(t=>
-    (!fMes.value || (t.data||'').startsWith(fMes.value)) &&
-    (!fCategoria.value || t.categoria===fCategoria.value) &&
-    (!fTipo.value || t.tipo===fTipo.value) &&
-    matchesSearch(t, fBusca.value)
-  );
-}
-[fMes,fCategoria,fTipo].forEach(el=> el.addEventListener('change', render));
-fBusca.addEventListener('input', render);
-
-function renderCatChart(list){
-  const rows = gastosPorCategoria(list, 'Saída');
-  if(rows.length===0){ catChart.innerHTML = '<div class="empty">Nenhuma saída neste filtro.</div>'; return; }
-  const max = rows[0][1];
-  const colors = {};
-  rows.forEach(([category])=>{ colors[category] = categoryColor(category); });
-  catLegend.innerHTML = rows.map(([category])=>`<span class="catLegendItem" data-category="${escapeHtml(category)}" style="--cat-color:${colors[category]}"><i class="catSwatch"></i>${escapeHtml(category)}</span>`).join('');
-  catChart.innerHTML = rows.map(([cat,val])=>
-    `<div class="catrow" data-category="${escapeHtml(cat)}" style="--cat-color:${colors[cat]}"><span class="name">${escapeHtml(cat)}</span><div class="bar"><div style="width:${(val/max*100)}%"></div></div><span class="amt">${fmt(val)}</span></div>`
-  ).join('');
-  catChart.querySelectorAll('.catrow').forEach(row=>row.addEventListener('click',()=>showCategoryTip(row.dataset.category,row)));
-  catLegend.querySelectorAll('.catLegendItem').forEach(item=>item.addEventListener('click',()=>{
-    fCategoria.value = item.dataset.category;
-    render();
-  }));
-}
-
-function categoryColor(category){
-  const palette = ['#25e6e0','#d7b56d','#ff7a90','#8bd17c','#a78bfa','#f59e0b','#60a5fa','#f472b6','#34d399','#fb7185'];
-  let hash = 0;
-  for(const character of String(category)) hash = (hash*31 + character.charCodeAt(0)) >>> 0;
-  return palette[hash % palette.length];
-}
-
-function renderBudgetChart(){
-  const targets = {Faculdade:config.faculdade, Celular:config.celular, Cartão:config.cartao, Lazer:config.lazer, Investimentos:config.investAlvo};
-  const spent = {};
-  transactions.filter(t=>t.tipo==='Saída'&&(t.data||'').startsWith(selectedMonth)).forEach(t=>{
-    spent[t.categoria] = (spent[t.categoria]||0) + (Number(t.valor)||0);
-  });
-  budgetChart.innerHTML = Object.entries(targets).map(([category,target])=>{
-    const used = spent[category]||0;
-    const ratio = target>0 ? used/target : 0;
-    const remaining = target-used;
-    const fill = Math.min(ratio,1)*100;
-    const state = remaining<0 ? 'over' : 'under';
-    return `<div class="budgetRow"><div class="budgetHead"><span>${escapeHtml(category)}</span><strong class="${state}">${remaining<0?'excedeu ':'restam '}${fmt(Math.abs(remaining))}</strong></div><div class="bar"><div class="${remaining<0?'overfill':''}" style="width:${fill}%"></div></div></div>`;
-  }).join('');
-}
-
-function renderSaldoChart(list,lineId='saldoChartLine',areaId='saldoChartArea'){
-  const line = document.getElementById(lineId);
-  const area = document.getElementById(areaId);
-  const ordered = [...list].sort((a,b)=> (a.data||'').localeCompare(b.data||''));
-  if(!ordered.length){
-    line.setAttribute('d','M0 22 L100 22');
-    area.setAttribute('d','M0 22 L100 22 L100 44 L0 44 Z');
-    return;
-  }
-  let balance = 0;
-  const points = [{x:0,value:0}];
-  ordered.forEach((transaction,index)=>{
-    const amount = Number(transaction.valor)||0;
-    balance += transaction.tipo==='Entrada' ? amount : -amount;
-    points.push({x:(index+1)/(ordered.length)*100,value:balance});
-  });
-  const values = points.map(point=>point.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const spread = max-min || Math.max(Math.abs(max),1);
-  const lower = min-spread*.12;
-  const upper = max+spread*.12;
-  const toY = value => 38-((value-lower)/(upper-lower))*32;
-  const path = points.map(point=>`${point===points[0]?'M':'L'}${point.x.toFixed(2)} ${toY(point.value).toFixed(2)}`).join(' ');
-  line.setAttribute('d',path);
-  area.setAttribute('d',`${path} L100 44 L0 44 Z`);
-}
-
-function showCategoryTip(category, anchor){
-  const items = transactions.filter(t=>t.tipo==='Saída'&&t.categoria===category&&(t.data||'').startsWith(selectedMonth));
-  categoryTip.innerHTML = `<strong>${escapeHtml(category)}</strong><br>${items.map(t=>`${escapeHtml(t.descricao||'—')} · ${fmt(Number(t.valor)||0)}`).join('<br>') || 'Nenhum lançamento neste mês.'}`;
-  categoryTip.hidden = false;
-  const rect = anchor.getBoundingClientRect();
-  categoryTip.style.left = Math.min(Math.max(8,rect.left),window.innerWidth-288)+'px';
-  categoryTip.style.top = Math.min(rect.bottom+8,window.innerHeight-120)+'px';
-  clearTimeout(showCategoryTip.timer); showCategoryTip.timer=setTimeout(()=>categoryTip.hidden=true,3500);
-}
-document.addEventListener('click',e=>{ if(!e.target.closest('.catrow')&&!e.target.closest('#categoryTip')) categoryTip.hidden=true; });
-
-function render(){
-  monthHint.hidden = Boolean(firstUseMonthValue);
-  demoBanner.hidden = !hasSampleData();
-  populateFilters();
-  const list = filteredList();
-  document.getElementById('list').innerHTML = '';
-  const sorted = [...list].sort((a,b)=> (b.data||'').localeCompare(a.data||''));
-  emptyMsg.style.display = sorted.length===0 ? 'block' : 'none';
-  let entradas=0, saidas=0, naoPago=0;
-  for(const t of list){
-    const v = Number(t.valor)||0;
-    if(t.tipo==='Entrada') entradas += v; else saidas += v;
-    if(t.pago==='Não') naoPago++;
-  }
-  vSaldo.textContent = fmt(entradas-saidas); vEntradas.textContent = fmt(entradas); vSaidas.textContent = fmt(saidas);
-  renderSaldoChart(list);
-  if(naoPago>0){ pendMsg.style.display='block'; pendMsg.innerHTML = `<b>${naoPago}</b> lançamento(s) marcado(s) como "Não pago"`; }
-  else pendMsg.style.display='none';
-  const ul = document.getElementById('list');
-  for(const t of sorted){
-    const li = document.createElement('li');
-    const sign = t.tipo==='Entrada' ? '+' : '-';
-    const cls = t.tipo==='Entrada' ? 'pos' : 'neg';
-    li.innerHTML = `<div><div class="desc">${escapeHtml(t.descricao||'')}</div>
-      <div class="meta">${escapeHtml(t.categoria||'—')}${t.data? ' · '+t.data:''}${t.forma? ' · '+escapeHtml(t.forma):''}
-      <span class="tag ${t.pago==='Não'?'nao':''}">${t.pago==='Não'?'Não pago':'Pago'}</span></div></div>
-      <div style="display:flex;align-items:center;gap:6px;">
-      <div class="val ${cls}">${sign} ${fmt(Math.abs(Number(t.valor)||0))}</div>
-      <div class="icons"><button class="iconbtn edit" data-id="${escapeHtml(t.id)}" aria-label="Editar lançamento">✎</button><button class="iconbtn del" data-id="${escapeHtml(t.id)}" aria-label="Excluir lançamento">✕</button></div></div>`;
-    ul.appendChild(li);
-  }
-  ul.querySelectorAll('.del').forEach(b=> b.addEventListener('click', ()=>{
-    pendingDeleteId=b.dataset.id; deleteModal.showModal();
-  }));
-  ul.querySelectorAll('.edit').forEach(b=> b.addEventListener('click', ()=> startEdit(b.dataset.id)));
-  renderCatChart(list);
-  renderBudgetChart();
-  renderGeral();
-  renderEvolution();
-  updateBackupChip();
-  updateQuickSummary();
-}
-
-function startEdit(id){
-  const t = transactions.find(x=>x.id===id); if(!t) return;
-  editingId = id;
-  document.getElementById('data').value = t.data||'';
-  tipo.value = t.tipo; categoria.value = t.categoria; desc.value = t.descricao;
-  valor.value = t.valor; forma.value = t.forma; pago.value = t.pago;
-  btnSubmit.textContent = 'Salvar edição'; btnCancelEdit.style.display='block';
-  modalTitle.textContent='Editar lançamento'; transactionModal.showModal();
-  document.querySelector('[data-tab="lanc"]').click();
-}
-btnCancelEdit.addEventListener('click', ()=>{
-  editingId = null; document.getElementById('form').reset();
-  btnSubmit.textContent = 'Adicionar lançamento'; btnCancelEdit.style.display='none';
-  modalTitle.textContent='Novo lançamento'; transactionModal.close();
-});
-
-async function addTransaction(t){
-  t.id = 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2,7);
-  transactions.push(t); render();
+btnCancelRestore.addEventListener('click', ()=>{ pendingRestore=null; restoreModal.close(); });
+btnConfirmRestore.addEventListener('click', ()=>{
+  if(!pendingRestore) return;
+  config = {...config, ...pendingRestore.config};
+  transactions = pendingRestore.transactions;
+  if(pendingRestore.firstUseMonth) firstUseMonthValue = pendingRestore.firstUseMonth;
   saveLocalState();
-}
-async function updateTransaction(id, t){
-  const idx = transactions.findIndex(x=>x.id===id); if(idx<0) return;
-  t.id = id; transactions[idx] = t; render();
-  saveLocalState();
-}
-async function removeTransaction(id){
-  transactions = transactions.filter(t=>t.id!==id); render();
-  saveLocalState();
-}
-
-document.getElementById('form').addEventListener('submit', (e)=>{
-  e.preventDefault();
-  const d = desc.value.trim(); const v = parseFloat(valor.value);
-  if(!d || isNaN(v)) return;
-  const payload = { descricao:d, valor:v, tipo:tipo.value, categoria:categoria.value, forma:forma.value,
-    pago:pago.value, data: document.getElementById('data').value || todayISO() };
-  if(editingId){ updateTransaction(editingId, payload); editingId=null; btnSubmit.textContent='Adicionar lançamento'; btnCancelEdit.style.display='none'; showToast('Lançamento atualizado ✓'); }
-  else { addTransaction(payload); showToast('Lançamento salvo ✓'); }
-  e.target.reset(); tipo.value='Entrada'; pago.value='Sim';
-  modalTitle.textContent='Novo lançamento'; transactionModal.close();
+  pendingRestore = null;
+  restoreModal.close();
+  fillCfgForm();
+  setMonth(selectedMonth);
+  showToast('Backup restaurado ✓');
 });
 
-btnImport.addEventListener('click', ()=> fileInput.click());
-fileInput.addEventListener('change', async (e)=>{
+// ---- Limpar ----
+btnClearData.addEventListener('click', ()=>{ moreSheet.close(); clearModal.showModal(); });
+btnCancelClear.addEventListener('click', ()=>clearModal.close());
+btnConfirmClear.addEventListener('click', ()=>{
+  transactions = [];
+  saveLocalState();
+  clearModal.close();
+  render();
+  showToast('Lançamentos limpos ✓');
+});
+
+// ---- Planilhas ----
+btnImport.addEventListener('click', ()=>{ moreSheet.close(); fileInput.click(); });
+fileInput.addEventListener('change', async e=>{
   const file = e.target.files[0]; if(!file) return;
   try{
     const buf = await file.arrayBuffer();
@@ -547,18 +564,20 @@ fileInput.addEventListener('change', async (e)=>{
   }catch(err){ console.error(err); showToast('Não foi possível importar a planilha'); }
   e.target.value = '';
 });
-btnConfirmImport.addEventListener('click', async ()=>{
+btnCancelImport.addEventListener('click', ()=>{ pendingImport=[]; importModal.close(); });
+btnConfirmImport.addEventListener('click', ()=>{
   const items = pendingImport; pendingImport=[];
-  for(const item of items) await addTransaction(item);
+  items.forEach(item=>{ item.id = 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); transactions.push(item); });
+  saveLocalState(); render();
   importModal.close();
   showToast(items.length ? `${items.length} lançamento(s) importado(s) ✓` : 'Nenhum lançamento importado');
 });
-
 btnExport.addEventListener('click', ()=>{
+  moreSheet.close();
   const sorted = [...transactions].sort((a,b)=> (a.data||'').localeCompare(b.data||''));
-  const data = sorted.map(t=>({Data:t.data||'', Tipo:t.tipo||'', Categoria:t.categoria||'', Descrição:t.descricao||'',
+  const rows = sorted.map(t=>({Data:t.data||'', Tipo:t.tipo||'', Categoria:t.categoria||'', Descrição:t.descricao||'',
     Valor:Number(t.valor)||0, 'Forma de pagamento':t.forma||'', 'Pago?':t.pago||''}));
-  const ws = XLSX.utils.json_to_sheet(data);
+  const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Lançamentos');
   const out = XLSX.write(wb, {bookType:'xlsx', type:'base64'});
@@ -570,46 +589,80 @@ btnExport.addEventListener('click', ()=>{
   URL.revokeObjectURL(url);
 });
 
-function downloadFile(filename, content, type){
-  const blob = new Blob([content], {type});
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url; link.download = filename; link.click();
-  URL.revokeObjectURL(url);
+// ---- Menu "Mais", tema e privacidade ----
+btnMore.addEventListener('click', ()=>{ updateBackupChip(); syncThemeSeg(); moreSheet.showModal(); });
+btnCloseMore.addEventListener('click', ()=>moreSheet.close());
+
+const THEME_KEY = 'meu-financeiro-theme';
+function currentTheme(){ const t = document.documentElement.dataset.theme; return t==='light'||t==='dark' ? t : 'auto'; }
+function syncThemeSeg(){ themeSeg.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.theme===currentTheme())); }
+themeSeg.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{
+  const mode = b.dataset.theme;
+  if(mode==='auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = mode;
+  try{ if(mode==='auto') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, mode); }catch(e){}
+  syncThemeSeg();
+}));
+
+const PRIVACY_KEY = 'meu-financeiro-privacy';
+function applyPrivacy(on){
+  document.body.classList.toggle('privacy', on);
+  btnPrivacy.setAttribute('aria-pressed', String(on));
+  btnPrivacy.setAttribute('aria-label', on ? 'Mostrar valores' : 'Ocultar valores');
+  btnPrivacy.innerHTML = `<svg class="ic"><use href="#${on ? 'i-eye-off' : 'i-eye'}"/></svg>`;
 }
-btnBackupJson.addEventListener('click', doBackup);
-btnBackupChip.addEventListener('click', doBackup);
-btnRestoreJson.addEventListener('click', ()=>jsonInput.click());
-btnClearData.addEventListener('click', ()=>clearModal.showModal());
-jsonInput.addEventListener('change', async e=>{
-  const file = e.target.files[0]; if(!file) return;
-  try{
-    const backup = JSON.parse(await file.text());
-    if(!backup || !Array.isArray(backup.transactions) || !backup.config) throw new Error('Formato inválido');
-    pendingRestore = backup;
-    restoreSummary.textContent = `${backup.transactions.length} lançamento(s) e configurações da reserva encontrados no backup.`;
-    restoreModal.showModal();
-  }catch(err){ showToast('Backup JSON inválido'); }
-  e.target.value = '';
+btnPrivacy.addEventListener('click', ()=>{
+  const on = !document.body.classList.contains('privacy');
+  try{ localStorage.setItem(PRIVACY_KEY, on ? '1' : '0'); }catch(e){}
+  applyPrivacy(on);
 });
 
-(async ()=>{
+// ---- Aviso de instalação no iPhone (Safari fora da tela de início) ----
+const IOS_HINT_KEY = 'meu-financeiro-ios-hint';
+function isIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1); }
+function isStandalone(){ return navigator.standalone===true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches); }
+function maybeShowIosHint(forced){
+  let dismissed = false; try{ dismissed = localStorage.getItem(IOS_HINT_KEY)==='1'; }catch(e){}
+  iosHint.hidden = !(forced || (isIOS() && !isStandalone() && !dismissed));
+}
+btnIosHintClose.addEventListener('click', ()=>{
+  try{ localStorage.setItem(IOS_HINT_KEY, '1'); }catch(e){}
+  iosHint.hidden = true;
+});
+
+// ---- Render geral ----
+function render(){
+  monthText.textContent = cap(monthLabel(selectedMonth));
+  controlMes.value = selectedMonth;
+  demoBanner.hidden = !hasSampleData();
+  populateFilters();
+  renderGeral();
+  renderEvolution();
+  renderLancamentos();
+  renderBudgetChart();
+  updateBackupChip();
+}
+
+(function init(){
   try{
     loadLocalState();
-    // abre no mês atual; só usa o primeiro mês de uso se ele ainda estiver no futuro
-    selectedMonth = (firstUseMonthValue && firstUseMonthValue > curMonth()) ? firstUseMonthValue : curMonth();
-    controlMes.value = selectedMonth;
-    saveLocalState();
+    selectedMonth = curMonth();
     applyPrivacy(localStorage.getItem(PRIVACY_KEY)==='1');
     // pede ao navegador para não apagar os dados do site por falta de espaço (iOS/Android)
     if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
   }catch(e){ console.error('init failed', e); }
-  fillCfgForm(); render();
-  // Atalhos de URL para apresentação: ?demo carrega os dados de exemplo; &tab=lanc|plan abre a aba.
+  fillCfgForm();
+  populateFilters();
+  fMes.value = selectedMonth;
+  render();
+  // Atalhos de URL para apresentação: ?demo carrega os dados de exemplo; &tab=lanc|plan abre a aba;
+  // &privacidade oculta os valores; &tema=claro|escuro força o tema sem gravá-lo.
   const params = new URLSearchParams(location.search);
   maybeShowIosHint(params.has('ios'));
   if(params.has('privacidade')) applyPrivacy(true);
+  const temaParam = params.get('tema'); // só para apresentação; não grava a escolha
+  if(temaParam==='claro') document.documentElement.dataset.theme = 'light';
+  if(temaParam==='escuro') document.documentElement.dataset.theme = 'dark';
   if(params.has('demo') && !transactions.length) loadSampleData();
   const tabParam = params.get('tab');
-  if(['geral','lanc','plan'].includes(tabParam)) document.querySelector(`[data-tab="${tabParam}"]`).click();
+  if(['geral','lanc','plan'].includes(tabParam)) goTab(tabParam);
 })();

@@ -5,19 +5,25 @@ Aplicativo web de **controle financeiro pessoal**: visão geral do mês, lançam
 **Experimente:** <https://nevessdhiego-design.github.io/meu-financeiro/?demo> (o `?demo` carrega dados de exemplo, todos fictícios).
 
 <p align="center">
-  <img src="docs/telas/visao-geral.png" alt="Visão geral: saldo planejado, metas, cartão e evolução dos últimos 6 meses" width="24%">
-  <img src="docs/telas/lancamentos.png" alt="Lançamentos: saldo do mês, busca, filtros e lista" width="24%">
-  <img src="docs/telas/planejamento.png" alt="Planejamento: orçamento restante por categoria" width="24%">
+  <img src="docs/telas/desktop.png" alt="Visão geral no computador, no tema escuro: menu lateral, saldo do mês, planejado, metas e cartão" width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/telas/visao-geral.png" alt="Visão geral no celular: saldo do mês, planejado e metas" width="24%">
+  <img src="docs/telas/lancamentos.png" alt="Lançamentos agrupados por dia, com busca e filtros" width="24%">
+  <img src="docs/telas/planejamento.png" alt="Planejar: orçamento restante e configurações, no tema escuro" width="24%">
   <img src="docs/telas/privacidade.png" alt="Modo privacidade: valores borrados na tela" width="24%">
 </p>
 
 ## O que ele faz
 
-- **Visão geral:** recursos e despesas fixas do mês, saldo planejado, progresso da reserva e da meta de patrimônio, uso do teto do cartão, parcelas restantes e gráfico de entradas x saídas dos últimos 6 meses.
-- **Lançamentos:** cadastro, edição e exclusão; **busca por texto** (sem diferenciar acento ou maiúsculas); filtros por mês, categoria e tipo; indicação de lançamentos não pagos; gráfico de saldo e gastos por categoria.
-- **Planejamento:** orçamento restante por categoria e configuração de salário, benefícios, metas e dias úteis.
+- **Início:** saldo do mês com a evolução do dia a dia, planejado x realizado, metas em anéis (reserva e patrimônio), uso do teto do cartão, parcelas restantes, para onde foi o dinheiro (por categoria) e entradas x saídas dos últimos 6 meses.
+- **Navegação por mês:** setas ou seletor no topo mudam o mês de todas as telas.
+- **Lançamentos:** lista agrupada por dia, com **busca por texto** (sem diferenciar acento ou maiúsculas) e filtros por mês, categoria e tipo; toque num item para editar ou excluir; indicação de lançamentos não pagos. Tocar numa categoria do Início já abre a lista filtrada.
+- **Planejar:** orçamento restante por categoria e configuração de salário, benefícios, metas e dias úteis, em grupos de campos no estilo das configurações do iPhone.
 - **Modo privacidade:** um toque borra todos os valores na tela (útil em lugares públicos); a escolha fica salva.
 - **Backup:** exporta um JSON pela **folha de compartilhar** do celular (Arquivos, iCloud Drive etc.) ou por download no computador, avisa quando o último backup está velho e restaura com prévia antes de gravar.
+- **Tema claro e escuro:** segue o aparelho e pode ser fixado em **Mais → Tema**.
 - **Planilhas:** importação e exportação de `.xlsx`.
 - **PWA:** `manifest` e *service worker* para instalar na tela inicial e abrir sem internet.
 
@@ -33,12 +39,12 @@ Os dados do app instalado ficam separados dos do Safari, então **faça o backup
 
 | Parte | Tecnologia |
 |---|---|
-| Interface | HTML, CSS e JavaScript puros (sem framework e sem *build*): `index.html`, `css/styles.css`, `js/app.js` |
-| Lógica pura | `js/lib.js` (formatação, importação, totais por mês, busca, status do backup), sem DOM e testável no Node |
+| Interface | HTML, CSS e JavaScript puros (sem framework e sem *build*): `index.html`, `css/styles.css`, `js/app.js`; layout mobile primeiro (barra de abas no celular, menu lateral no computador), ícones em SVG embutido e tema por variáveis CSS |
+| Lógica pura | `js/lib.js` (formatação, importação, totais por mês e por categoria, agrupamento por dia, busca, status do backup), sem DOM e testável no Node |
 | Armazenamento | `localStorage` do navegador |
 | Planilhas | [SheetJS](https://sheetjs.com/) por CDN, com verificação de integridade (SRI) |
 | API opcional | Python, FastAPI e SQLite, em `backend/` (veja o [README do backend](backend/README.md)) |
-| Testes | `node --test` na lógica (12 testes) e `pytest` na API (13 testes), ambos na CI do GitHub |
+| Testes | `node --test` na lógica (15 testes) e `pytest` na API (13 testes), ambos na CI do GitHub |
 
 Decisões que valem destacar:
 
@@ -46,7 +52,7 @@ Decisões que valem destacar:
 - **Sem dependência de servidor:** a API existe para a próxima etapa (sincronização entre aparelhos), mas o app não precisa dela.
 - **Segurança na interface:** tudo o que vem de planilha ou de backup é escapado antes de ir para o HTML.
 - **Fuso horário correto:** datas e meses usam o horário local, não UTC.
-- **Pensado para o celular:** campos de 16 px (o Safari não dá zoom ao digitar), teclado decimal no valor e pedido de armazenamento persistente.
+- **Pensado para o celular:** barra de abas ao alcance do polegar, folhas que sobem de baixo para lançar e editar, campos de 16 px (o Safari não dá zoom ao digitar), teclado decimal no valor e pedido de armazenamento persistente.
 
 ## Como rodar
 
@@ -56,7 +62,7 @@ O app é estático. Na pasta do projeto:
 python -m http.server 8000
 ```
 
-Abra `http://localhost:8000/?demo` no navegador. Atalhos úteis na URL: `?demo` (dados de exemplo), `&tab=lanc` ou `&tab=plan` (abre a aba) e `&privacidade` (valores ocultos).
+Abra `http://localhost:8000/?demo` no navegador. Atalhos úteis na URL: `?demo` (dados de exemplo), `&tab=lanc` ou `&tab=plan` (abre a aba), `&privacidade` (valores ocultos) e `&tema=claro` ou `&tema=escuro`.
 
 Testes da lógica (precisa do Node 20 ou superior):
 

@@ -117,9 +117,46 @@
     return { level: days > maxDays ? 'atrasado' : 'em-dia', days };
   }
 
+  // Rótulo do cabeçalho de um dia na lista: "Hoje", "Ontem" ou "qua, 12 de nov".
+  function dayLabel(dateISO, todayStr) {
+    if (!dateISO) return 'Sem data';
+    const diff = daysBetween(dateISO, todayStr);
+    if (diff === 0) return 'Hoje';
+    if (diff === 1) return 'Ontem';
+    const [y, m, d] = dateISO.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    const weekday = date.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
+    const rest = date.toLocaleDateString('pt-BR', { day: 'numeric', month: 'short' }).replace('.', '');
+    return `${weekday}, ${rest}`;
+  }
+
+  // Agrupa lançamentos por dia (dia mais recente primeiro) com o saldo líquido de cada dia.
+  function groupByDay(list) {
+    const days = new Map();
+    for (const t of list) {
+      const key = t.data || '';
+      if (!days.has(key)) days.set(key, { date: key, items: [], net: 0 });
+      const day = days.get(key);
+      day.items.push(t);
+      day.net += (t.tipo === 'Entrada' ? 1 : -1) * (Number(t.valor) || 0);
+    }
+    return [...days.values()].sort((a, b) => b.date.localeCompare(a.date));
+  }
+
+  // Total por categoria das saídas de um mês, da maior para a menor.
+  function categoryTotals(transactions, month, tipo = 'Saída') {
+    const totals = new Map();
+    for (const t of transactions) {
+      if (t.tipo !== tipo || !String(t.data || '').startsWith(month)) continue;
+      const key = t.categoria || 'Outros';
+      totals.set(key, (totals.get(key) || 0) + (Number(t.valor) || 0));
+    }
+    return [...totals.entries()].map(([categoria, total]) => ({ categoria, total })).sort((a, b) => b.total - a.total);
+  }
+
   return {
     fmt, pct, escapeHtml, pad2, todayISO, curMonth, shiftMonth, monthLabel, monthShort,
     normalizeText, normalizeImportText, parseImportNumber, parseImportDate,
-    monthlyTotals, matchesSearch, daysBetween, backupStatus,
+    monthlyTotals, matchesSearch, daysBetween, backupStatus, dayLabel, groupByDay, categoryTotals,
   };
 });

@@ -1,20 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#122844"/>
-      <stop offset="1" stop-color="#070d1c"/>
-    </linearGradient>
-    <linearGradient id="wallet" x1="104" y1="150" x2="400" y2="380" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1f4264"/>
-      <stop offset="1" stop-color="#10243d"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0a3b31"/>
+      <stop offset="1" stop-color="#14805f"/>
     </linearGradient>
   </defs>
   <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <path d="M118 182h276c11 0 20 9 20 20v150c0 16-13 29-29 29H127c-16 0-29-13-29-29V211c0-16 9-29 20-29Z" fill="url(#wallet)" stroke="#e8f3ff" stroke-width="20" stroke-linejoin="round"/>
-  <path d="M118 182v-15c0-31 25-56 56-56h125c31 0 56 25 56 56v15" fill="none" stroke="#25e6e0" stroke-width="20" stroke-linecap="round"/>
-  <path d="M98 235h316" stroke="#8de8ed" stroke-width="16" opacity=".8"/>
-  <path d="M318 253h66c17 0 30 13 30 30v46c0 17-13 30-30 30h-66c-29 0-52-24-52-53s23-53 52-53Z" fill="#d7b56d" stroke="#f7e2a8" stroke-width="10"/>
-  <circle cx="318" cy="306" r="12" fill="#17243a"/>
-  <path d="M157 302h72" stroke="#25e6e0" stroke-width="16" stroke-linecap="round"/>
-  <path d="M157 347h48" stroke="#7dc9d5" stroke-width="14" stroke-linecap="round" opacity=".8"/>
+  <rect x="129" y="264" width="62" height="96" rx="18" fill="#fff" fill-opacity=".55"/>
+  <rect x="225" y="210" width="62" height="150" rx="18" fill="#fff" fill-opacity=".8"/>
+  <rect x="321" y="150" width="62" height="210" rx="18" fill="#6ee7b7"/>
+  <rect x="105" y="378" width="302" height="8" rx="4" fill="#fff" fill-opacity=".35"/>
 </svg>
