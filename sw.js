@@ -1,11 +1,13 @@
-const CACHE_NAME = 'meu-financeiro-v4';
+const CACHE_NAME = 'meu-financeiro-v5';
 const APP_SHELL = [
   './',
   './index.html',
   './css/styles.css',
+  './js/lib.js',
   './js/app.js',
   './manifest.webmanifest',
   './icone-financeiro.svg',
+  './icone-financeiro-180.png',
   './icone-financeiro-192.png',
   './icone-financeiro-512.png'
 ];

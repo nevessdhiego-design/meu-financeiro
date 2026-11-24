@@ -211,3 +211,23 @@ summary{font-size:.88rem;font-weight:600;cursor:pointer;}
 .demoBanner{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:10px 0 0;padding:8px 12px;border:1px solid rgba(212,175,106,.45);border-radius:10px;background:rgba(212,175,106,.08);font-size:.8rem;color:var(--text)}
 .demoBanner button{background:transparent;border:1px solid var(--gold);color:var(--gold);border-radius:8px;padding:4px 10px;font-size:.75rem;cursor:pointer}
 .demoBanner[hidden]{display:none}
+
+/* iPhone: campos com 16px evitam o zoom automático do Safari ao focar */
+@media (max-width:520px){ input,select,textarea{font-size:16px;} }
+.statusRow{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px;}
+.chip{padding:6px 12px;font-size:.74rem;color:var(--muted);background:var(--card);border:1px solid var(--border);border-radius:999px;cursor:pointer;}
+.chip:hover,.chip[aria-pressed="true"]{color:var(--accent);border-color:var(--accent);}
+.chip[data-level="nunca"],.chip[data-level="atrasado"]{color:var(--warn);border-color:rgba(255,204,51,.5);}
+.chip[hidden]{display:none;}
+.iosHint{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;padding:10px 12px;border:1px solid rgba(0,240,255,.35);border-radius:10px;background:rgba(0,240,255,.06);font-size:.8rem;line-height:1.35;}
+.iosHint button{flex-shrink:0;background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:8px;padding:5px 10px;font-size:.75rem;cursor:pointer;}
+.iosHint[hidden]{display:none;}
+.searchBox{margin-bottom:8px;}
+.evoSvg{display:block;width:100%;height:auto;}
+.evoSvg text{fill:var(--muted);font-size:9px;}
+.evoIn{fill:var(--pos);} .evoOut{fill:var(--neg);}
+.evoLegend{display:flex;gap:14px;justify-content:center;margin-top:8px;font-size:.72rem;color:var(--muted);}
+.evoLegend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px;}
+.evoLegend i.evoIn{background:var(--pos);} .evoLegend i.evoOut{background:var(--neg);}
+/* Modo privacidade */
+body.privacy :is(.card .value,.val,.goal .info,.reserveValue,.reserveMeta,.reserveExtra,.quickItem strong,.budgetHead strong,.catrow .amt,.categoryTip,.previewTable td:nth-child(4),.saldoChart,.evoSvg){filter:blur(7px);user-select:none;}

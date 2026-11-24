@@ -1,5 +1,7 @@
 /* Meu Financeiro: lógica do app (sem dependências, exceto SheetJS para planilhas).
-   Os dados ficam só no navegador (localStorage). */
+   Os dados ficam só no navegador (localStorage). As funções puras estão em lib.js (window.FinLib). */
+const { fmt, pct, escapeHtml, pad2, todayISO, curMonth, shiftMonth, monthLabel, monthShort, normalizeImportText,
+        parseImportNumber, parseImportDate, monthlyTotals, matchesSearch, backupStatus } = FinLib;
 let transactions = [];
 let editingId = null;
 let pendingDeleteId = null;
@@ -29,18 +31,6 @@ function saveLocalState(){
   catch(e){ console.warn('Não foi possível salvar os dados locais', e); }
 }
 
-function fmt(n){ return (n<0?'-':'') + 'R$ ' + Math.abs(n).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
-function pct(n){ return (n*100).toLocaleString('pt-BR',{maximumFractionDigits:1}) + '%'; }
-function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-function pad2(n){ return String(n).padStart(2,'0'); }
-// Data e mês no fuso local (toISOString() usa UTC e erra o dia perto da meia-noite).
-function todayISO(){ const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`; }
-function curMonth(){ return todayISO().slice(0,7); }
-function monthLabel(month){
-  if(!month) return 'mês selecionado';
-  const [year,value] = month.split('-');
-  return new Date(Number(year),Number(value)-1,1).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
-}
 function showToast(message){
   toast.textContent = message; toast.classList.add('show');
   clearTimeout(showToast.timer); showToast.timer = setTimeout(()=>toast.classList.remove('show'), 2000);
@@ -68,32 +58,6 @@ function updateQuickSummary(){
   quickSaldo.textContent = fmt(monthTotals.entradas-monthTotals.saidas);
   quickReserva.textContent = fmt(config.reservaAtual);
   quickReservaPct.textContent = pct(config.metaReserva>0 ? Math.min(config.reservaAtual/config.metaReserva,1) : 0);
-}
-function normalizeImportText(value){
-  return String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
-}
-function parseImportNumber(value){
-  if(typeof value==='number') return value;
-  let text = String(value??'').replace(/[^\d,.-]/g,'').trim();
-  if(!text) return NaN;
-  if(text.includes(',') && text.includes('.')) text = text.replace(/\./g,'').replace(',','.');
-  else if(text.includes(',')) text = text.replace(',','.');
-  return Number(text);
-}
-function parseImportDate(value){
-  if(value instanceof Date && !isNaN(value)){
-    return [value.getFullYear(),String(value.getMonth()+1).padStart(2,'0'),String(value.getDate()).padStart(2,'0')].join('-');
-  }
-  if(typeof value==='number' && value>0){
-    const date = new Date(Date.UTC(1899,11,30) + value*86400000);
-    return date.toISOString().slice(0,10);
-  }
-  const text = String(value??'').trim();
-  if(/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(text)){
-    const [day,month,year] = text.split('/');
-    return `${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`;
-  }
-  return text.slice(0,10);
 }
 
 btnOpenForm.addEventListener('click', ()=>{
@@ -161,13 +125,13 @@ btnConfirmRestore.addEventListener('click', ()=>{
   showToast('Backup restaurado ✓');
 });
 quickCurrentMonth.addEventListener('click', ()=>{
-  fMes.value = selectedMonth; fCategoria.value = ''; fTipo.value = ''; render();
+  fMes.value = selectedMonth; fCategoria.value = ''; fTipo.value = ''; fBusca.value = ''; render();
 });
 quickExpenses.addEventListener('click', ()=>{
-  fMes.value = selectedMonth; fCategoria.value = ''; fTipo.value = 'Saída'; render();
+  fMes.value = selectedMonth; fCategoria.value = ''; fTipo.value = 'Saída'; fBusca.value = ''; render();
 });
 quickClearFilters.addEventListener('click', ()=>{
-  fMes.value = ''; fCategoria.value = ''; fTipo.value = ''; render();
+  fMes.value = ''; fCategoria.value = ''; fTipo.value = ''; fBusca.value = ''; render();
 });
 btnCancelDelete.addEventListener('click', ()=>deleteModal.close());
 deleteModal.addEventListener('click', e=>{ if(e.target===deleteModal) deleteModal.close(); });
@@ -251,11 +215,6 @@ btnSaveCfg.addEventListener('click', async ()=>{
 // ---- Dados de exemplo (100% fictícios) ----
 const SAMPLE_PREFIX = 'demo_';
 function hasSampleData(){ return transactions.some(t=>String(t.id).startsWith(SAMPLE_PREFIX)); }
-function shiftMonth(month, delta){
-  const [y,m] = month.split('-').map(Number);
-  const d = new Date(y, m-1+delta, 1);
-  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}`;
-}
 function buildSampleTransactions(month){
   const at = day => `${month}-${pad2(day)}`;
   const rows = [
@@ -294,6 +253,83 @@ btnExitDemo.addEventListener('click', ()=>{
   showToast('Dados de exemplo removidos');
 });
 
+// ---- Backup: folha de compartilhar (iPhone: Arquivos/iCloud) ou download ----
+const LAST_BACKUP_KEY = 'meu-financeiro-last-backup';
+function lastBackup(){ try{ return localStorage.getItem(LAST_BACKUP_KEY); }catch(e){ return null; } }
+function updateBackupChip(){
+  const s = backupStatus(lastBackup(), transactions.length>0, todayISO());
+  btnBackupChip.hidden = s.level==='vazio' || hasSampleData();
+  btnBackupChip.dataset.level = s.level;
+  btnBackupChip.textContent = s.level==='nunca' ? '💾 Sem backup ainda'
+    : s.level==='atrasado' ? `💾 Backup há ${s.days} dias`
+    : s.days===0 ? '💾 Backup de hoje' : `💾 Backup há ${s.days} dia(s)`;
+}
+async function doBackup(){
+  const backup = {version:1, exportedAt:new Date().toISOString(), config, transactions, firstUseMonth:firstUseMonthValue};
+  const content = JSON.stringify(backup,null,2);
+  const name = `meu-financeiro-backup-${todayISO()}.json`;
+  try{
+    const file = new File([content], name, {type:'application/json'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({files:[file], title:'Backup do Meu Financeiro'});
+    }else{
+      downloadFile(name, content, 'application/json');
+    }
+  }catch(e){
+    if(e && e.name==='AbortError') return; // a pessoa fechou a folha de compartilhamento
+    console.warn('Compartilhamento indisponível; baixando o arquivo', e);
+    downloadFile(name, content, 'application/json');
+  }
+  try{ localStorage.setItem(LAST_BACKUP_KEY, todayISO()); }catch(e){}
+  updateBackupChip();
+  showToast('Backup criado ✓');
+}
+
+// ---- Modo privacidade: borra os valores na tela ----
+const PRIVACY_KEY = 'meu-financeiro-privacy';
+function applyPrivacy(on){
+  document.body.classList.toggle('privacy', on);
+  btnPrivacy.setAttribute('aria-pressed', String(on));
+  btnPrivacy.textContent = on ? '🙈 Valores ocultos' : '👁 Ocultar valores';
+}
+btnPrivacy.addEventListener('click', ()=>{
+  const on = !document.body.classList.contains('privacy');
+  try{ localStorage.setItem(PRIVACY_KEY, on ? '1' : '0'); }catch(e){}
+  applyPrivacy(on);
+});
+
+// ---- Evolução dos últimos 6 meses ----
+function renderEvolution(){
+  const data = monthlyTotals(transactions, selectedMonth, 6);
+  if(data.every(d=>!d.entradas && !d.saidas)){
+    evoChart.innerHTML = '<div class="empty">Sem lançamentos nos últimos 6 meses.</div>'; return;
+  }
+  const W = 300, H = 120, top = 8, plotH = H - top - 22, slot = W / data.length, bw = slot * 0.3;
+  const max = Math.max(1, ...data.flatMap(d=>[d.entradas, d.saidas]));
+  const bars = data.map((d,i)=>{
+    const x0 = i*slot + slot/2, he = d.entradas/max*plotH, hs = d.saidas/max*plotH;
+    return `<g><title>${escapeHtml(monthLabel(d.month))}: entradas ${fmt(d.entradas)}, saídas ${fmt(d.saidas)}</title>`
+      + `<rect class="evoIn" x="${x0-bw-1}" y="${top+plotH-he}" width="${bw}" height="${he}" rx="2"/>`
+      + `<rect class="evoOut" x="${x0+1}" y="${top+plotH-hs}" width="${bw}" height="${hs}" rx="2"/>`
+      + `<text x="${x0}" y="${H-6}" text-anchor="middle">${escapeHtml(monthShort(d.month))}</text></g>`;
+  }).join('');
+  evoChart.innerHTML = `<svg class="evoSvg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Entradas e saídas dos últimos 6 meses">${bars}</svg>`
+    + '<div class="evoLegend"><span><i class="evoIn"></i>Entradas</span><span><i class="evoOut"></i>Saídas</span></div>';
+}
+
+// ---- Aviso de instalação no iPhone (Safari fora da tela de início) ----
+const IOS_HINT_KEY = 'meu-financeiro-ios-hint';
+function isIOS(){ return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1); }
+function isStandalone(){ return navigator.standalone===true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches); }
+function maybeShowIosHint(forced){
+  let dismissed = false; try{ dismissed = localStorage.getItem(IOS_HINT_KEY)==='1'; }catch(e){}
+  iosHint.hidden = !(forced || (isIOS() && !isStandalone() && !dismissed));
+}
+btnIosHintClose.addEventListener('click', ()=>{
+  try{ localStorage.setItem(IOS_HINT_KEY, '1'); }catch(e){}
+  iosHint.hidden = true;
+});
+
 // ---- Filtros ----
 function populateFilters(){
   const months = [...new Set([...transactions.map(t=>(t.data||'').slice(0,7)).filter(Boolean),selectedMonth])].sort().reverse();
@@ -309,10 +345,12 @@ function filteredList(){
   return transactions.filter(t=>
     (!fMes.value || (t.data||'').startsWith(fMes.value)) &&
     (!fCategoria.value || t.categoria===fCategoria.value) &&
-    (!fTipo.value || t.tipo===fTipo.value)
+    (!fTipo.value || t.tipo===fTipo.value) &&
+    matchesSearch(t, fBusca.value)
   );
 }
 [fMes,fCategoria,fTipo].forEach(el=> el.addEventListener('change', render));
+fBusca.addEventListener('input', render);
 
 function renderCatChart(list){
   const rows = gastosPorCategoria(list, 'Saída');
@@ -431,6 +469,8 @@ function render(){
   renderCatChart(list);
   renderBudgetChart();
   renderGeral();
+  renderEvolution();
+  updateBackupChip();
   updateQuickSummary();
 }
 
@@ -537,11 +577,8 @@ function downloadFile(filename, content, type){
   link.href = url; link.download = filename; link.click();
   URL.revokeObjectURL(url);
 }
-btnBackupJson.addEventListener('click', ()=>{
-  const backup = {version:1, exportedAt:new Date().toISOString(), config, transactions, firstUseMonth:firstUseMonthValue};
-  downloadFile('meu-financeiro-backup.json', JSON.stringify(backup,null,2), 'application/json');
-  showToast('Backup JSON criado ✓');
-});
+btnBackupJson.addEventListener('click', doBackup);
+btnBackupChip.addEventListener('click', doBackup);
 btnRestoreJson.addEventListener('click', ()=>jsonInput.click());
 btnClearData.addEventListener('click', ()=>clearModal.showModal());
 jsonInput.addEventListener('change', async e=>{
@@ -559,12 +596,19 @@ jsonInput.addEventListener('change', async e=>{
 (async ()=>{
   try{
     loadLocalState();
-    if(firstUseMonthValue) selectedMonth = firstUseMonthValue;
+    // abre no mês atual; só usa o primeiro mês de uso se ele ainda estiver no futuro
+    selectedMonth = (firstUseMonthValue && firstUseMonthValue > curMonth()) ? firstUseMonthValue : curMonth();
+    controlMes.value = selectedMonth;
     saveLocalState();
+    applyPrivacy(localStorage.getItem(PRIVACY_KEY)==='1');
+    // pede ao navegador para não apagar os dados do site por falta de espaço (iOS/Android)
+    if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
   }catch(e){ console.error('init failed', e); }
   fillCfgForm(); render();
   // Atalhos de URL para apresentação: ?demo carrega os dados de exemplo; &tab=lanc|plan abre a aba.
   const params = new URLSearchParams(location.search);
+  maybeShowIosHint(params.has('ios'));
+  if(params.has('privacidade')) applyPrivacy(true);
   if(params.has('demo') && !transactions.length) loadSampleData();
   const tabParam = params.get('tab');
   if(['geral','lanc','plan'].includes(tabParam)) document.querySelector(`[data-tab="${tabParam}"]`).click();
