@@ -24,7 +24,7 @@ Aplicativo web de **controle financeiro pessoal**: visão geral do mês, lançam
 - **Modo privacidade:** um toque borra todos os valores na tela (útil em lugares públicos); a escolha fica salva.
 - **Backup:** exporta um JSON pela **folha de compartilhar** do celular (Arquivos, iCloud Drive etc.) ou por download no computador, avisa quando o último backup está velho e restaura com prévia antes de gravar.
 - **Tema claro e escuro:** segue o aparelho e pode ser fixado em **Mais → Tema**.
-- **Importar extrato do banco:** lê arquivos **OFX** e **CSV** exportados pelo banco ou pelo cartão (conta corrente e fatura), tudo no próprio aparelho. Reconhece as colunas sozinho, sugere a categoria pela descrição, ignora o que já foi importado (não duplica ao reimportar) e mostra uma prévia com as opções "fatura de cartão" e "inverter entradas e saídas" antes de gravar. Há exemplos fictícios em [`docs/exemplos/`](docs/exemplos).
+- **Importar extrato do banco:** lê arquivos **OFX**, **CSV** e **PDF** com texto exportados pelo banco ou pelo cartão (conta corrente e fatura), tudo no próprio aparelho (o leitor de PDF, pdf.js, é baixado com verificação de integridade só quando se importa um PDF). Reconhece as colunas sozinho, sugere a categoria pela descrição, ignora o que já foi importado (não duplica ao reimportar) e mostra uma prévia com as opções "fatura de cartão" e "inverter entradas e saídas" antes de gravar. Há exemplos fictícios em [`docs/exemplos/`](docs/exemplos).
 - **Planilhas:** importação e exportação de `.xlsx`.
 - **PWA:** `manifest` e *service worker* para instalar na tela inicial e abrir sem internet.
 
@@ -41,11 +41,11 @@ Os dados do app instalado ficam separados dos do Safari, então **faça o backup
 | Parte | Tecnologia |
 |---|---|
 | Interface | HTML, CSS e JavaScript puros (sem framework e sem *build*): `index.html`, `css/styles.css`, `js/app.js`; layout mobile primeiro (barra de abas no celular, menu lateral no computador), ícones em SVG embutido e tema por variáveis CSS |
-| Lógica pura | `js/lib.js` (formatação, leitura de OFX e CSV, categorias sugeridas, duplicados, totais por mês e por categoria, agrupamento por dia, busca, status do backup), sem DOM e testável no Node |
+| Lógica pura | `js/lib.js` (formatação, leitura de OFX, CSV e do texto de PDF, categorias sugeridas, duplicados, totais por mês e por categoria, agrupamento por dia, busca, status do backup), sem DOM e testável no Node |
 | Armazenamento | `localStorage` do navegador |
 | Planilhas | [SheetJS](https://sheetjs.com/) por CDN, com verificação de integridade (SRI) |
 | API opcional | Python, FastAPI e SQLite, em `backend/` (veja o [README do backend](backend/README.md)) |
-| Testes | `node --test` na lógica (27 testes) e `pytest` na API (13 testes), ambos na CI do GitHub |
+| Testes | `node --test` na lógica (33 testes) e `pytest` na API (13 testes), ambos na CI do GitHub |
 
 Decisões que valem destacar:
 
@@ -89,7 +89,7 @@ A documentação interativa da API fica em `http://127.0.0.1:8000/docs`.
 - Os dados ficam só no navegador: trocar de aparelho, limpar os dados do site ou desinstalar o app apaga tudo. Use o **Backup** com regularidade.
 - A API ainda **não tem autenticação**; por isso não está conectada ao app nem publicada (detalhes no README do backend).
 - A importação de planilha `.xlsx` espera colunas de data, descrição, valor, tipo, categoria e forma de pagamento; o app mostra uma prévia e só grava depois de você confirmar.
-- Cada banco exporta de um jeito. O leitor de CSV cobre os formatos mais comuns (separador `;` ou `,`, valores com vírgula ou ponto, colunas de crédito e débito, fatura de cartão), mas um layout fora do padrão pode não ser reconhecido; a prévia mostra isso antes de gravar. A categoria é só uma sugestão por palavras-chave e pode ser corrigida em cada lançamento. Não há leitura de PDF nem conexão automática com bancos (Open Finance).
+- Cada banco exporta de um jeito. O leitor de CSV cobre os formatos mais comuns (separador `;` ou `,`, valores com vírgula ou ponto, colunas de crédito e débito, fatura de cartão), mas um layout fora do padrão pode não ser reconhecido; a prévia mostra isso antes de gravar. A categoria é só uma sugestão por palavras-chave e pode ser corrigida em cada lançamento. O PDF é lido pelo texto, sem OCR (não funciona com foto ou PDF escaneado), e como cada banco diagrama o PDF de um jeito, a leitura é por heurística: a prévia pede conferência e, quando o PDF não indica entrada ou saída, o app avisa quantos itens foram deduzidos pelas palavras. Não há conexão automática com bancos (Open Finance).
 - Não há testes automatizados da interface (só da lógica em `js/lib.js` e da API); a conferência da tela é manual.
 
 ## Próximos passos

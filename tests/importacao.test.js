@@ -115,6 +115,66 @@ test('parseOFX lê SGML antigo e XML de cartão', () => {
   assert.equal(c.items[0].descricao, 'Caf&e');
 });
 
+test('pdfItemsToLines junta os itens de texto por linha, na ordem da página', () => {
+  const t = (str, x, y, width = 30) => ({ str, transform: [1, 0, 0, 1, x, y], width });
+  const lines = lib.pdfItemsToLines([t('Compra', 50, 700), t('05/11', 20, 700, 25), t(' ', 60, 700, 3), t('-45,90', 400, 700), t('Saldo', 20, 650)]);
+  assert.deepEqual(lines, ['05/11 Compra  -45,90', 'Saldo']);
+});
+
+test('parsePdfStatement lê extrato de conta com sinal, datas com e sem ano e ignora saldos', () => {
+  const r = lib.parsePdfStatement([
+    'Extrato de 01/11/2026 a 30/11/2026',
+    '01/11/2026 SALDO ANTERIOR 1.000,00',
+    '03/11/2026 Pix enviado Fulano -120,50 879,50',
+    '04/11 Compra no débito Mercado Bairro 1.234,56- 0,00',
+    '05/11/2026 Transferência recebida Empresa Exemplo 3.200,00 C',
+  ]);
+  assert.equal(r.cardHint, false);
+  assert.deepEqual(r.items.map((i) => [i.data, i.valor, i.descricao]), [
+    ['2026-11-03', -120.5, 'Pix enviado Fulano'],
+    ['2026-11-04', -1234.56, 'Compra no débito Mercado Bairro'],
+    ['2026-11-05', 3200, 'Transferência recebida Empresa Exemplo'],
+  ]);
+  assert.equal(r.uncertain, 0);
+});
+
+test('parsePdfStatement decide entrada ou saída por palavras quando o PDF não traz sinal, e conta os palpites', () => {
+  const r = lib.parsePdfStatement([
+    'Período 01/11/2026 a 30/11/2026',
+    '03/11/2026 Pix recebido Fulano 250,00 1.250,00',
+    '04/11/2026 Compra Padaria 18,40 1.231,60',
+    '05/11/2026 Serviço qualquer 10,00 1.221,60',
+  ]);
+  assert.deepEqual(r.items.map((i) => i.valor), [250, -18.4, -10]);
+  assert.equal(r.uncertain, 1);
+});
+
+test('parsePdfStatement lê fatura de cartão (dia e mês por extenso, gastos positivos) e títulos por dia', () => {
+  const f = lib.parsePdfStatement([
+    'Fatura de novembro 2026 Vencimento 10/11/2026 Limite disponível',
+    '05 NOV Pizzaria Exemplo R$ 89,90',
+    '07 NOV Estorno Loja −R$ 20,00',
+    'Total da fatura R$ 69,90',
+  ]);
+  assert.equal(f.cardHint, true);
+  assert.equal(f.invertHint, true);
+  assert.deepEqual(f.items.map((i) => [i.data, i.valor]), [['2026-11-05', 89.9], ['2026-11-07', -20]]);
+  const dia = lib.parsePdfStatement([
+    '03 de novembro de 2026 Total de entradas + 1.000,00',
+    'Transferência recebida Empresa Exemplo 1.000,00',
+    '04 de novembro de 2026 Total de saídas - 45,00',
+    'Compra no débito Padaria 45,00',
+  ]);
+  assert.deepEqual(dia.items.map((i) => [i.data, i.valor]), [['2026-11-03', 1000], ['2026-11-04', -45]]);
+});
+
+test('parsePdfStatement sem lançamentos devolve só o formato das linhas, sem nomes nem valores', () => {
+  const r = lib.parsePdfStatement(['Cabeçalho', 'Fulano de Tal 12345 78,90']);
+  assert.equal(r.items.length, 0);
+  assert.equal(r.error, 'pdf');
+  assert.deepEqual(r.shapes, ['a a a 99999 99,99']);
+});
+
 test('guessCategory sugere categoria pelas palavras e evita falsos positivos', () => {
   assert.equal(lib.guessCategory('UBER *TRIP', 'Saída'), 'Transporte');
   assert.equal(lib.guessCategory('iFood Restaurante', 'Saída'), 'Alimentação');

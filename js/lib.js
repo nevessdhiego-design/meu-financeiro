@@ -324,6 +324,114 @@
     return { items, invertHint: false, cardHint };
   }
 
+  // ---- PDF de extrato ou fatura ----
+  // O app extrai o texto do PDF (pdf.js) e entrega aqui os itens de texto com posição; estas funções
+  // são puras para poderem ser testadas sem PDF de verdade.
+  function pdfItemsToLines(items) {
+    const rows = [];
+    for (const it of items || []) {
+      if (!it || typeof it.str !== 'string' || !it.str.trim() || !Array.isArray(it.transform)) continue;
+      const y = it.transform[5];
+      let row = rows.find((r) => Math.abs(r.y - y) <= 2.5);
+      if (!row) { row = { y, cells: [] }; rows.push(row); }
+      row.cells.push({ x: it.transform[4], w: it.width || 0, s: it.str.trim() });
+    }
+    rows.sort((a, b) => b.y - a.y);
+    return rows.map((row) => {
+      row.cells.sort((a, b) => a.x - b.x);
+      let out = '', end = null;
+      for (const c of row.cells) {
+        if (end !== null) { const gap = c.x - end; out += gap > 12 ? '  ' : gap > 1.5 ? ' ' : ''; }
+        out += c.s;
+        end = c.x + c.w;
+      }
+      return out;
+    });
+  }
+
+  const PT_MONTHS = { jan: 1, fev: 2, mar: 3, abr: 4, mai: 5, jun: 6, jul: 7, ago: 8, set: 9, out: 10, nov: 11, dez: 12 };
+  const DATE_NUM = /^\s*(\d{1,2})[/.-](\d{1,2})(?:[/.-](\d{4}|\d{2}))?(?=\s|$)/;
+  const DATE_TXT = /^\s*(\d{1,2})\s+(?:de\s+)?(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[a-zç]*\.?(?:\s+(?:de\s+)?(\d{4}))?(?=\s|$)/i;
+  const MONEY_END = /(?:^|\s)((?:[-−–+]\s?)?(?:R\$\s?)?(?:[-−–+]\s?)?\(?(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}\)?(?:\s?[CD]\b|-)?)\s*$/i;
+  const PDF_SKIP = /^(total|subtotal|saldo|limite|vencimento|pagamento minimo|valor total|resumo|encargos|juros)\b|saldo (anterior|do dia|final|disponivel|inicial)/;
+  const PDF_OUT = /compra|debito|pagamento|pagto|pgto|pix enviado|transferencia enviada|enviad[ao]|saque|tarifa|taxa|boleto|fatura|\biof\b|juros|anuidade|debitado/;
+  const PDF_IN = /recebid[ao]|deposito|credito|salario|estorno|rendimento|reembolso|provento|devolucao|devolvid[ao]|cashback/;
+
+  function pdfDate(line, year) {
+    let m = DATE_NUM.exec(line), day, month, y;
+    if (m) { day = +m[1]; month = +m[2]; y = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : year; }
+    else if ((m = DATE_TXT.exec(line))) { day = +m[1]; month = PT_MONTHS[normalizeText(m[2]).slice(0, 3)]; y = m[3] ? +m[3] : year; }
+    else return null;
+    if (!y || month < 1 || month > 12 || day < 1 || day > 31) return null;
+    const d = new Date(y, month - 1, day);
+    if (d.getMonth() !== month - 1) return null;
+    return { iso: `${y}-${pad2(month)}-${pad2(day)}`, rest: line.slice(m[0].length).trim(), numeric: m === null ? false : /^\s*\d{1,2}[/.-]/.test(m[0]) };
+  }
+
+  function moneyToken(token) {
+    const digits = token.match(/(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}/)[0];
+    const valor = parseMoney(digits);
+    const neg = /[-−–]/.test(token) || /^\(/.test(token.trim()) || /\bD$/i.test(token.trim());
+    const pos = /\+/.test(token) || /\bC$/i.test(token.trim());
+    return { valor, sign: neg ? -1 : pos ? 1 : 0 };
+  }
+
+  // Mostra só o "formato" da linha (dígitos viram 9, palavras viram a), sem nomes nem valores.
+  function maskLine(line) {
+    return String(line).slice(0, 60).replace(/\d/g, '9').replace(/[A-Za-zÀ-ÿ]+/g, 'a');
+  }
+
+  function parsePdfStatement(lines, { year } = {}) {
+    const all = (lines || []).map((l) => String(l).replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const norm = normalizeText(all.join('\n'));
+    const cardHint = /fatura/.test(norm) && /(vencimento|limite|cartao)/.test(norm);
+    const yearCount = {};
+    for (const m of norm.matchAll(/\b(20\d\d)\b/g)) yearCount[m[1]] = (yearCount[m[1]] || 0) + 1;
+    const topYear = Object.keys(yearCount).sort((a, b) => yearCount[b] - yearCount[a])[0];
+    const yearHint = topYear ? +topYear : year;
+    const items = [];
+    let current = '', section = 0, uncertain = 0;
+    for (const line of all) {
+      const date = pdfDate(line, yearHint);
+      let body = date ? date.rest : line;
+      if (date && date.numeric) { const second = pdfDate(body, yearHint); if (second && second.numeric) body = second.rest; }
+      const amounts = [];
+      for (let guard = 0; guard < 3; guard++) {
+        const m = MONEY_END.exec(body);
+        if (!m) break;
+        amounts.unshift(m[1]);
+        body = body.slice(0, m.index).trim();
+      }
+      const nBody = normalizeText(body);
+      if (!date && !amounts.length) {
+        if (/^(total de )?entradas?$/.test(nBody)) section = 1;
+        else if (/^(total de )?(saidas?|gastos|debitos)$/.test(nBody)) section = -1;
+        continue;
+      }
+      if (date && (!amounts.length || PDF_SKIP.test(nBody))) { current = date.iso; section = 0; continue; }
+      if (!amounts.length || PDF_SKIP.test(nBody)) continue;
+      if (date) current = date.iso;
+      if (!current) continue;
+      if (!/[a-zà-ÿ]{2}/i.test(body) || (!date && body.length < 4)) continue;
+      const { valor, sign } = moneyToken(amounts[0]);
+      if (!Number.isFinite(valor) || valor === 0) continue;
+      let signed;
+      if (cardHint) signed = sign < 0 ? -valor : valor; // fatura: gastos positivos
+      else if (sign !== 0) signed = sign * valor;
+      else if (section !== 0) signed = section * valor;
+      else if (PDF_IN.test(nBody)) signed = valor;
+      else if (PDF_OUT.test(nBody)) signed = -valor;
+      else { signed = -valor; uncertain++; }
+      items.push({ data: date ? date.iso : current, valor: signed, descricao: body });
+    }
+    const result = { items, invertHint: cardHint, cardHint, uncertain };
+    if (!items.length) {
+      result.error = 'pdf';
+      result.shapes = all.filter((l) => MONEY_END.test(l) || DATE_NUM.test(l) || DATE_TXT.test(l)).slice(0, 6).map(maskLine);
+    }
+    return result;
+  }
+
   // Categoria sugerida pelas palavras da descrição (e, se houver, da categoria do banco).
   const EXPENSE_RULES = [
     ['Cartão', /(pagamento|pgto|pag)\s*(de\s*)?fatura|fatura\s*(do\s*)?cartao/],
@@ -400,6 +508,6 @@
     normalizeText, normalizeImportText, parseImportNumber, parseImportDate,
     monthlyTotals, matchesSearch, daysBetween, backupStatus, dayLabel, groupByDay, categoryTotals,
     decodeBytes, parseBankDate, parseMoney, parseCSV, parseBankCSV, parseOFX,
-    guessCategory, guessForma, bankTransactions, markDuplicates,
+    pdfItemsToLines, parsePdfStatement, guessCategory, guessForma, bankTransactions, markDuplicates,
   };
 });

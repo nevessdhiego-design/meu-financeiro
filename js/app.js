@@ -534,7 +534,60 @@ btnConfirmClear.addEventListener('click', ()=>{
 });
 
 // ---- Importação: extrato do banco (OFX ou CSV) ou planilha (.xlsx) ----
-const { decodeBytes, parseBankCSV, parseOFX, bankTransactions, markDuplicates } = FinLib;
+const { decodeBytes, parseBankCSV, parseOFX, parsePdfStatement, pdfItemsToLines, bankTransactions, markDuplicates } = FinLib;
+
+// Leitor de PDF (pdf.js), carregado só quando alguém importa um PDF. Versão fixa e verificada por SRI.
+const PDFJS_BASE = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+const PDFJS_SRI = {
+  'pdf.min.js':'sha512-q+4liFwdPC/bNdhUpZx6aXDx/h77yEQtn4I1slHydcbZK34nLaR3cAeYSJshoxIOq3mjEf7xJE8YWIUHMn+oCQ==',
+  'pdf.worker.min.js':'sha512-BbrZ76UNZq5BhH7LL7pn9A4TKQpQeNCHOo65/akfelcIBbcVvYWOFQKPXIrykE3qZxYjmDX573oa4Ywsc7rpTw=='
+};
+let pdfjsReady = null;
+function loadPdfjs(){
+  if(pdfjsReady) return pdfjsReady;
+  pdfjsReady = new Promise((resolve, reject)=>{
+    if(window.pdfjsLib) return resolve(window.pdfjsLib);
+    const s = document.createElement('script');
+    s.src = PDFJS_BASE + 'pdf.min.js'; s.integrity = PDFJS_SRI['pdf.min.js']; s.crossOrigin = 'anonymous'; s.referrerPolicy = 'no-referrer';
+    s.onload = async ()=>{
+      try{
+        const res = await fetch(PDFJS_BASE + 'pdf.worker.min.js', {integrity:PDFJS_SRI['pdf.worker.min.js'], mode:'cors', referrerPolicy:'no-referrer'});
+        if(!res.ok) throw new Error('worker');
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(await res.blob());
+        resolve(window.pdfjsLib);
+      }catch(e){ reject(new Error('pdf-lib')); }
+    };
+    s.onerror = ()=>reject(new Error('pdf-lib'));
+    document.head.appendChild(s);
+  }).catch(e=>{ pdfjsReady = null; throw e; });
+  return pdfjsReady;
+}
+async function readPdfLines(buf){
+  const pdfjs = await loadPdfjs();
+  let password;
+  for(let attempt=0; attempt<2; attempt++){
+    const task = pdfjs.getDocument({data:new Uint8Array(buf.slice(0)), password, isEvalSupported:false});
+    try{
+      const doc = await task.promise;
+      const lines = [];
+      for(let p=1; p<=Math.min(doc.numPages, 40); p++){
+        const page = await doc.getPage(p);
+        const content = await page.getTextContent();
+        lines.push(...pdfItemsToLines(content.items));
+      }
+      return lines;
+    }catch(err){
+      if(err && err.name==='PasswordException'){
+        // A senha só é usada para abrir este arquivo e não é guardada.
+        password = window.prompt('Este PDF tem senha. Digite a senha para abrir (ela não é salva):');
+        if(!password) throw new Error('pdf-senha');
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('pdf-senha');
+}
 let importSource = null; // { kind:'bank', parsed } ou { kind:'xlsx', items }
 let importIgnored = 0;
 
@@ -574,10 +627,14 @@ function renderImportPreview(){
   pendingImport = fresh;
   const totalIn = sum(fresh, t=>t.tipo==='Entrada' ? (Number(t.valor)||0) : 0);
   const totalOut = sum(fresh, t=>t.tipo==='Entrada' ? 0 : (Number(t.valor)||0));
-  const ignoredText = importIgnored ? ` ${importIgnored} pagamento(s) de fatura ignorado(s), pois já aparecem como saída na conta.` : '';
+  const pdfParsed = importSource && importSource.pdf ? importSource.parsed : null;
+  const ignoredText = (importIgnored ? ` ${importIgnored} pagamento(s) de fatura ignorado(s), pois já aparecem como saída na conta.` : '')
+    + (pdfParsed ? ` PDF lido pelo texto: confira cada linha.` + (pdfParsed.uncertain ? ` Em ${pdfParsed.uncertain} item(ns) o PDF não indica entrada ou saída e marquei como saída.` : '') : '');
   if(!all.length && !importIgnored){
     const p = importSource && importSource.kind==='bank' ? importSource.parsed : null;
     importSummary.textContent = !p ? 'Nenhum lançamento válido encontrado.'
+      : p.error==='pdf'
+        ? 'Li o PDF, mas não reconheci lançamentos nele (precisa ser um PDF com texto, não foto).' + (p.shapes && p.shapes.length ? ` Formato das linhas: ${p.shapes.join(' | ')}. Me passe só isso para eu ajustar.` : '')
       : p.error==='colunas'
         ? 'Não reconheci as colunas deste CSV (preciso de data, descrição e valor).' + (p.header && p.header.length ? ` Colunas que encontrei: ${p.header.join(' | ')}. Me passe só esses nomes para eu ajustar.` : '')
         : 'Não encontrei lançamentos neste arquivo.';
@@ -605,7 +662,18 @@ fileInput.addEventListener('change', async e=>{
     const head = new Uint8Array(buf.slice(0,4));
     const isPdf = head[0]===0x25 && head[1]===0x50 && head[2]===0x44 && head[3]===0x46; // %PDF
     const isZip = head[0]===0x50 && head[1]===0x4B && !/\.(xlsx|xls)$/.test(name);
-    if(isPdf || /\.pdf$/.test(name)){ showToast('PDF não dá para ler. Exporte o extrato em OFX ou CSV', 5000); return; }
+    if(isPdf || /\.pdf$/.test(name)){
+      showToast('Lendo o PDF…', 8000);
+      const parsed = parsePdfStatement(await readPdfLines(buf));
+      toast.classList.remove('show');
+      importSource = {kind:'bank', parsed, pdf:true};
+      importCard.checked = Boolean(parsed.cardHint);
+      importInvert.checked = Boolean(parsed.invertHint);
+      importOptions.hidden = false;
+      renderImportPreview();
+      importModal.showModal();
+      return;
+    }
     if(isZip || /\.zip$/.test(name)){ showToast('Este arquivo é um ZIP. Abra-o e escolha o OFX ou CSV de dentro', 5000); return; }
     if(/\.(xlsx|xls)$/.test(name)){
       importSource = {kind:'xlsx', items:readXlsx(buf)};
@@ -620,7 +688,10 @@ fileInput.addEventListener('change', async e=>{
     }
     renderImportPreview();
     importModal.showModal();
-  }catch(err){ console.error(err); showToast('Não foi possível ler o arquivo'); }
+  }catch(err){
+    console.error(err && err.name);
+    showToast(err && err.message==='pdf-senha' ? 'PDF protegido: senha não aceita' : err && err.message==='pdf-lib' ? 'Não consegui carregar o leitor de PDF (precisa de internet na primeira vez)' : 'Não foi possível ler o arquivo', 5000);
+  }
 });
 btnCancelImport.addEventListener('click', ()=>{ pendingImport=[]; importSource=null; importModal.close(); });
 btnConfirmImport.addEventListener('click', ()=>{
