@@ -81,13 +81,20 @@
   }
 
   // Entradas e saídas por mês, dos últimos `count` meses até `endMonth` (mais antigo primeiro).
+  // Movimentações que não são ganho nem gasto: pagamento da fatura (as compras do cartão já contam),
+  // transferência entre contas próprias e resgate de investimento. Ficam fora de entradas, saídas e categorias.
+  const NEUTRAL_CATEGORIES = ['Fatura paga', 'Transferência própria', 'Resgate'];
+  function isNeutral(t) {
+    return NEUTRAL_CATEGORIES.includes(t && t.categoria);
+  }
+
   function monthlyTotals(transactions, endMonth, count = 6) {
     const months = [];
     for (let i = count - 1; i >= 0; i--) months.push(shiftMonth(endMonth, -i));
     const totals = new Map(months.map((month) => [month, { month, entradas: 0, saidas: 0 }]));
     for (const t of transactions) {
       const bucket = totals.get(String(t.data || '').slice(0, 7));
-      if (!bucket) continue;
+      if (!bucket || isNeutral(t)) continue;
       const value = Number(t.valor) || 0;
       if (t.tipo === 'Entrada') bucket.entradas += value;
       else bucket.saidas += value;
@@ -147,7 +154,7 @@
   function categoryTotals(transactions, month, tipo = 'Saída') {
     const totals = new Map();
     for (const t of transactions) {
-      if (t.tipo !== tipo || !String(t.data || '').startsWith(month)) continue;
+      if (t.tipo !== tipo || isNeutral(t) || !String(t.data || '').startsWith(month)) continue;
       const key = t.categoria || 'Outros';
       totals.set(key, (totals.get(key) || 0) + (Number(t.valor) || 0));
     }
@@ -384,7 +391,9 @@
   function parsePdfStatement(lines, { year } = {}) {
     const all = (lines || []).map((l) => String(l).replace(/\s+/g, ' ').trim()).filter(Boolean);
     const norm = normalizeText(all.join('\n'));
-    const cardHint = /fatura/.test(norm) && /(vencimento|limite|cartao)/.test(norm);
+    // Fatura só se houver sinais próprios de fatura e nenhum de extrato de conta (senão a conta seria lida ao contrário).
+    const cardHint = /total da fatura|fatura fechada|fatura atual|pagamento minimo|fechamento da fatura|vencimento da fatura|limite (total|disponivel)/.test(norm)
+      && !/saldo (anterior|do dia|final|inicial)|extrato (de )?conta|conta corrente|agencia/.test(norm);
     const yearCount = {};
     for (const m of norm.matchAll(/\b(20\d\d)\b/g)) yearCount[m[1]] = (yearCount[m[1]] || 0) + 1;
     const topYear = Object.keys(yearCount).sort((a, b) => yearCount[b] - yearCount[a])[0];
@@ -434,26 +443,66 @@
 
   // Categoria sugerida pelas palavras da descrição (e, se houver, da categoria do banco).
   const EXPENSE_RULES = [
-    ['Cartão', /(pagamento|pgto|pag)\s*(de\s*)?fatura|fatura\s*(do\s*)?cartao/],
-    ['Investimentos', /aplicacao|\bcdb\b|\blci\b|\blca\b|tesouro|nuinvest|rico invest|xp invest|investiment|corretora/],
+    ['Fatura paga', /(pagamento|pgto|pagto|pag)\s*(de\s*|da\s*|do\s*)?(fatura|cartao)|fatura\s*(do\s*)?cartao|pagamento de cartao/],
+    ['Transferência própria', /mesma titularidade|entre contas|conta propria|para (a )?(sua|minha) conta/],
+    ['Investimentos', /aplicacao|\brdb\b|\bcdb\b|\blci\b|\blca\b|tesouro|nuinvest|rico invest|xp invest|investiment|corretora|poupanca/],
     ['Reserva', /reserva de emergencia/],
     ['Lazer', /academia|smartfit|bluefit|gympass/],
     ['Faculdade', /faculdade|universidade|\busjt\b|\bunip\b|anhanguera|estacio|mensalidade|udemy|alura|coursera|\bcurso|escola|educacao/],
-    ['Moradia', /aluguel|condominio|\biptu\b|\benel\b|\bcpfl\b|energia|sabesp|copasa|comgas|internet|fibra|imobiliaria/],
+    ['Moradia', /aluguel|condominio|\biptu\b|\benel\b|\bcpfl\b|energia|sabesp|copasa|comgas|internet|fibra|imobiliaria|\bluz\b|\bagua\b/],
     ['Celular', /recarga|\bclaro\b|\bvivo\b|\btim\b|\boi\b|algar/],
-    ['Transporte', /\buber\b|\b99\b|99app|99pop|cabify|indriver|\bposto\b|\bshell\b|ipiranga|petrobras|combustivel|gasolina|estacionamento|pedagio|sem parar|conectcar|\bmetro\b|\bcptm\b|sptrans|bilhete unico|onibus|transporte/],
-    ['Lazer', /netflix|spotify|cinema|ingresso|\bsteam\b|playstation|xbox|nintendo|disney|\bhbo\b|prime video|amazon prime|youtube|deezer|apple\.com|\bbar\b|\bpub\b|balada|teatro|academia|smartfit|bluefit|gympass|lazer/],
-    ['Alimentação', /ifood|rappi|mercado(?! ?(livre|pago))|supermercado|atacadao|assai|carrefour|pao de acucar|padaria|restaurante|lanchonete|acougue|hortifruti|sacolao|mcdonald|burger|subway|habib|outback|starbucks|cafeteria|pizza|sorvete|doceria|confeitaria|zaffari|condor|alimenta/],
+    ['Transporte', /\buber\b|99 ?app|99 ?pop|99 ?taxi|99 ?tecnologia|cabify|indriver|\bposto\b|\bshell\b|ipiranga|petrobras|combustivel|gasolina|estacionamento|pedagio|sem parar|conectcar|\bmetro\b|\bcptm\b|sptrans|bilhete unico|onibus|transporte|\bbrt\b|bike/],
+    ['Saúde', /farmacia|drogaria|drogasil|droga raia|pacheco|panvel|hospital|clinica|consulta|laboratorio|dentista|odonto|plano de saude|unimed|amil|hapvida|medic|exame|psicolog|saude/],
+    ['Lazer', /netflix|spotify|cinema|ingresso|\bsteam\b|playstation|xbox|nintendo|disney|\bhbo\b|prime video|amazon prime|youtube|deezer|apple\.com|icloud|globoplay|paramount|crunchyroll|\bbar\b|\bpub\b|balada|teatro|academia|smartfit|bluefit|gympass|lazer|viagem|hotel|airbnb|booking|decolar|latam|\bgol\b|azul linhas/],
+    ['Alimentação', /ifood|rappi|mercado(?! ?(livre|pago))|supermercado|atacadao|assai|carrefour|pao de acucar|padaria|restaurante|lanchonete|acougue|hortifruti|sacolao|mcdonald|burger|subway|habib|outback|starbucks|cafeteria|cafe\b|pizza|sorvete|doceria|confeitaria|zaffari|condor|alimenta|supermercado|lanche/],
+    ['Compras', /mercado ?livre|mercadolivre|amazon|magalu|magazine|americanas|shopee|shein|aliexpress|casas bahia|kabum|renner|riachuelo|centauro|netshoes|decathlon|leroy|zara|c&a|vestuario|roupa|calcado|livraria|saraiva/],
+    ['Taxas e impostos', /tarifa|anuidade|\biof\b|juros|encargos|multa|imposto|\birpf\b|\binss\b|seguro|cartorio|detran|licenciamento|\bipva\b/],
+    ['Transferências', /pix (enviado|para|saida)|transferencia (enviada|para|pix)|transf(erencia)? enviad|\bted\b|\bdoc\b|\bpix\b/],
   ];
   const INCOME_RULES = [
     ['Salário', /salario|proventos|folha de pagamento|folha pgto/],
     ['VR', /\balelo\b|sodexo|\bticket\b|vr beneficios|\bflash\b|ben visa/],
     ['VT', /vale transporte|sptrans|riocard|bilhete unico/],
+    ['Resgate', /resgate/],
+    ['Transferência própria', /mesma titularidade|entre contas|conta propria/],
+    ['Rendimentos', /rendimento|juros sobre|dividendo|\bjcp\b|cashback/],
+    ['Transferências', /pix (recebido|de)|transferencia (recebida|de|pix)|transf(erencia)? recebid|\bted\b|\bdoc\b|deposito|\bpix\b/],
   ];
-  function guessCategory(descricao, tipo = 'Saída', hint = '') {
+
+  // ---- Entender o lançamento: parcelas, "comerciante" e regras aprendidas ----
+  const GENERIC_WORDS = new Set(['compra', 'compras', 'debito', 'credito', 'pix', 'enviado', 'enviada', 'recebido', 'recebida', 'transferencia', 'transf', 'pagamento', 'pgto', 'pagto', 'pag', 'ted', 'doc', 'via', 'cartao', 'parcela', 'parc', 'parcelado', 'ltda', 'com', 'app', 'online', 'loja', 'para', 'por', 'pela', 'pelo', 'the']);
+
+  // "Parcela 3/10", "PARC 03 de 10", "(3/10)" ou "... 03/10" no fim: devolve { n, total } ou null.
+  function parseInstallment(descricao) {
+    const text = normalizeText(descricao);
+    const m = /\bparc(?:ela|elamento)?\.?\s*(\d{1,2})\s*(?:\/|de)\s*(\d{1,2})\b/.exec(text)
+      || /\b(\d{1,2})\s*(?:\/|de)\s*(\d{1,2})\s*parc/.exec(text)
+      || /\((\d{1,2})\s*\/\s*(\d{1,2})\)/.exec(text)
+      || /\s(\d{1,2})\/(\d{1,2})$/.exec(text);
+    if (!m) return null;
+    const n = Number(m[1]), total = Number(m[2]);
+    return total >= 2 && total <= 60 && n >= 1 && n <= total ? { n, total } : null;
+  }
+
+  // Chave estável do estabelecimento ("uber trip"), sem números, parcelas nem palavras genéricas.
+  function merchantKey(descricao) {
+    const text = normalizeText(descricao)
+      .replace(/\bparc(?:ela)?\.?\s*\d+\s*(?:\/|de)\s*\d+/g, ' ')
+      .replace(/\b\d+\/\d+\b/g, ' ')
+      .replace(/[^a-z\s]/g, ' ');
+    return text.split(/\s+/).filter((w) => w.length >= 3 && !GENERIC_WORDS.has(w)).slice(0, 3).join(' ');
+  }
+  const ruleKey = (descricao, tipo) => `${tipo === 'Entrada' ? 'Entrada' : 'Saída'}:${merchantKey(descricao)}`;
+
+  // Categoria sugerida: primeiro o que o Dhiego já ensinou (rules), depois as palavras da descrição e a categoria do banco.
+  function guessCategory(descricao, tipo = 'Saída', hint = '', rules = null) {
+    if (rules) {
+      const key = ruleKey(descricao, tipo);
+      if (key.length > 8 && rules[key]) return rules[key];
+    }
     const text = normalizeText(`${descricao} ${hint}`);
-    const rules = tipo === 'Entrada' ? INCOME_RULES : EXPENSE_RULES;
-    for (const [category, pattern] of rules) if (pattern.test(text)) return category;
+    const list = tipo === 'Entrada' ? INCOME_RULES : EXPENSE_RULES;
+    for (const [category, pattern] of list) if (pattern.test(text)) return category;
     return 'Outros';
   }
 
@@ -467,15 +516,38 @@
   // Em fatura de cartão, o pagamento da própria fatura já aparece como saída na conta: ignorar para não contar em dobro.
   const CARD_PAYMENT = /^(pagamento|pgto|pag)\s*(recebido|efetuado|de fatura|da fatura|fatura|on ?line)/;
 
-  function bankTransactions(raw, { invert = false, isCard = false } = {}) {
-    return raw.filter((item) => !(isCard && CARD_PAYMENT.test(normalizeText(item.descricao)))).map((item) => {
+  function daysApart(a, b) {
+    const [y1, m1, d1] = a.split('-').map(Number), [y2, m2, d2] = b.split('-').map(Number);
+    return Math.abs(Math.round((Date.UTC(y1, m1 - 1, d1) - Date.UTC(y2, m2 - 1, d2)) / 86400000));
+  }
+
+  // Uma saída e uma entrada de mesmo valor, até 2 dias de distância e com o mesmo nome na descrição,
+  // são o mesmo dinheiro mudando de conta (não é ganho nem gasto).
+  function markInternalTransfers(list) {
+    const used = new Set();
+    list.forEach((out, i) => {
+      if (out.tipo !== 'Saída' || used.has(i) || isNeutral(out)) return;
+      const key = merchantKey(out.descricao);
+      if (!key || !/transfer|pix|\bted\b|\bdoc\b|resgate|aplica/.test(normalizeText(out.descricao))) return;
+      const j = list.findIndex((inc, k) => k !== i && !used.has(k) && inc.tipo === 'Entrada' && !isNeutral(inc)
+        && Math.abs(inc.valor - out.valor) < 0.005 && daysApart(inc.data, out.data) <= 2 && merchantKey(inc.descricao) === key);
+      if (j < 0) return;
+      used.add(i); used.add(j);
+      out.categoria = 'Transferência própria';
+      list[j].categoria = 'Transferência própria';
+    });
+    return list;
+  }
+
+  function bankTransactions(raw, { invert = false, isCard = false, rules = null } = {}) {
+    const list = raw.filter((item) => !(isCard && CARD_PAYMENT.test(normalizeText(item.descricao)))).map((item) => {
       const expense = invert ? item.valor > 0 : item.valor < 0;
       const tipo = expense ? 'Saída' : 'Entrada';
       const transaction = {
         descricao: item.descricao,
         valor: Math.abs(item.valor),
         tipo,
-        categoria: guessCategory(item.descricao, tipo, item.hint),
+        categoria: guessCategory(item.descricao, tipo, item.hint, rules),
         forma: guessForma(item.descricao, tipo, isCard),
         pago: 'Sim',
         data: item.data,
@@ -483,6 +555,22 @@
       if (item.ref) transaction.ref = item.ref;
       return transaction;
     });
+    return isCard ? list : markInternalTransfers(list);
+  }
+
+  // Avisos sobre o arquivo antes de gravar: sentido invertido, conta tratada como fatura (e vice-versa).
+  function importSanity(list, { isCard = false } = {}) {
+    const warnings = [];
+    if (!list.length) return warnings;
+    const incomeLike = list.filter((t) => t.tipo === 'Entrada' && /salario|pix recebido|transferencia recebida|deposito|proventos/.test(normalizeText(t.descricao)));
+    if (isCard && incomeLike.length) warnings.push('Há salário ou transferências recebidas neste arquivo, então ele parece um extrato de conta, não uma fatura. Desmarque "É fatura de cartão".');
+    const parcelados = list.filter((t) => parseInstallment(t.descricao)).length;
+    if (!isCard && list.length >= 4 && parcelados / list.length >= 0.4) warnings.push('Muitos itens parcelados: parece fatura de cartão. Se for, marque "É fatura de cartão".');
+    const entradas = list.filter((t) => t.tipo === 'Entrada' && !isNeutral(t)).length;
+    if (!isCard && list.length >= 4 && entradas === 0) warnings.push('Só há saídas neste arquivo. Se ele tem entradas, tente "Inverter entradas e saídas".');
+    const neutros = list.filter(isNeutral).length;
+    if (neutros) warnings.push(`${neutros} movimentação(ões) (pagamento de fatura, transferência própria ou resgate) não entram nas entradas e saídas, para não contar em dobro.`);
+    return warnings;
   }
 
   function contentKey(t) {
@@ -503,11 +591,112 @@
     });
   }
 
+  // ---- Visão do mês: conta x cartão, sem contar a mesma coisa duas vezes ----
+  function monthSummary(transactions, month) {
+    const r = { entradas: 0, saidas: 0, resultado: 0, noCartao: 0, emConta: 0, count: 0, outros: 0 };
+    for (const t of transactions) {
+      if (!String(t.data || '').startsWith(month)) continue;
+      const v = Number(t.valor) || 0, entrada = t.tipo === 'Entrada', credito = t.forma === 'Crédito';
+      r.count++;
+      if (!credito) r.emConta += entrada ? v : -v; // dinheiro que de fato entrou ou saiu da conta
+      if (isNeutral(t)) continue;
+      if (entrada) r.entradas += v;
+      else { r.saidas += v; if (credito) r.noCartao += v; if ((t.categoria || 'Outros') === 'Outros') r.outros += v; }
+    }
+    r.resultado = r.entradas - r.saidas;
+    return r;
+  }
+
+  // Parcelas já lançadas que ainda vão cair nos próximos meses (a partir da última parcela vista de cada compra).
+  function installmentSchedule(transactions, fromMonth, horizon = 6) {
+    const groups = new Map();
+    for (const t of transactions) {
+      if (t.tipo !== 'Saída' || isNeutral(t)) continue;
+      const inst = parseInstallment(t.descricao);
+      const key = merchantKey(t.descricao);
+      if (!inst || !key || !t.data) continue;
+      const id = `${key}|${(Number(t.valor) || 0).toFixed(2)}|${inst.total}`;
+      const g = groups.get(id);
+      if (!g || inst.n > g.n) groups.set(id, { descricao: t.descricao, valor: Number(t.valor) || 0, n: inst.n, total: inst.total, month: t.data.slice(0, 7) });
+    }
+    const porMes = new Map(), itens = [];
+    for (const g of groups.values()) {
+      let restantes = 0;
+      for (let k = 1; k <= g.total - g.n; k++) {
+        const m = shiftMonth(g.month, k);
+        if (m <= fromMonth) continue;
+        restantes++;
+        porMes.set(m, (porMes.get(m) || 0) + g.valor);
+      }
+      if (restantes) itens.push({ descricao: g.descricao, valor: g.valor, n: g.n, total: g.total, restantes });
+    }
+    const meses = [...porMes.keys()].sort().slice(0, horizon).map((month) => ({ month, total: porMes.get(month) }));
+    const total = [...porMes.values()].reduce((a, b) => a + b, 0);
+    return { itens: itens.sort((a, b) => b.valor * b.restantes - a.valor * a.restantes), meses, total };
+  }
+
+  // Avisos de "isso não bate": cada um explica o problema e, quando dá, aponta a correção automática.
+  function dataWarnings(transactions, month) {
+    const out = [];
+    const s = monthSummary(transactions, month);
+    const inMonth = transactions.filter((t) => String(t.data || '').startsWith(month));
+    if (!inMonth.length) return out;
+    if (s.saidas > 0 && s.entradas === 0) {
+      const share = s.noCartao / s.saidas;
+      out.push({ id: 'sem-entradas', level: 'warn', text: share >= 0.7
+        ? `${Math.round(share * 100)}% das saídas deste mês (${fmt(s.noCartao)}) estão no cartão, que só sai da conta quando a fatura é paga. Não há entradas lançadas: importe também o extrato da conta para ver o salário e o saldo de verdade.`
+        : 'Este mês tem saídas e nenhuma entrada. Se você recebeu algo, importe o extrato da conta ou lance a entrada.' });
+    }
+    const lump = inMonth.filter((t) => t.tipo === 'Saída' && t.categoria === 'Cartão' && /fatura/.test(normalizeText(t.descricao)));
+    const lumpSum = lump.reduce((a, t) => a + (Number(t.valor) || 0), 0);
+    const itemized = inMonth.filter((t) => t.tipo === 'Saída' && t.forma === 'Crédito' && t.categoria !== 'Cartão' && !isNeutral(t)).reduce((a, t) => a + (Number(t.valor) || 0), 0);
+    if (lump.length && itemized >= lumpSum * 0.5) {
+      out.push({ id: 'dupla-contagem', level: 'warn', fix: 'fatura-paga', fixIds: lump.map((t) => t.id),
+        text: `O pagamento da fatura (${fmt(lumpSum)}) e as compras do cartão (${fmt(itemized)}) estão somados em dobro. Marcar o pagamento como "Fatura paga" faz contar só uma vez.` });
+    }
+    if (s.saidas > 0 && s.outros / s.saidas > 0.25) {
+      out.push({ id: 'muito-outros', level: 'info', fix: 'reanalisar',
+        text: `${Math.round((s.outros / s.saidas) * 100)}% das saídas estão em "Outros" (${fmt(s.outros)}). Reanalisar as categorias ou corrigir um lançamento ensina o app.` });
+    }
+    if (s.entradas > 0 && s.saidas > s.entradas) {
+      out.push({ id: 'saidas-maiores', level: 'info', text: `As saídas passaram as entradas em ${fmt(s.saidas - s.entradas)} neste mês.` });
+    }
+    return out;
+  }
+
+  // Aplica as regras aprendidas e as palavras aos lançamentos ainda em "Outros". Devolve a nova lista e quantos mudaram.
+  function recategorize(transactions, rules = null) {
+    let changed = 0;
+    const list = transactions.map((t) => {
+      if (t.categoria && t.categoria !== 'Outros') return t;
+      const categoria = guessCategory(t.descricao, t.tipo, '', rules);
+      if (categoria === 'Outros') return t;
+      changed++;
+      return { ...t, categoria };
+    });
+    return { transactions: list, changed };
+  }
+
+  // Aplica uma categoria a todos os lançamentos do mesmo estabelecimento e tipo (exceto o próprio). Devolve quantos mudaram.
+  function applyCategoryToSimilar(transactions, source, categoria) {
+    const key = ruleKey(source.descricao, source.tipo);
+    if (key.length <= 8) return { transactions, changed: 0 };
+    let changed = 0;
+    const list = transactions.map((t) => {
+      if (t.id === source.id || t.categoria === categoria || ruleKey(t.descricao, t.tipo) !== key) return t;
+      changed++;
+      return { ...t, categoria };
+    });
+    return { transactions: list, changed };
+  }
+
   return {
     fmt, pct, escapeHtml, pad2, todayISO, curMonth, shiftMonth, monthLabel, monthShort,
     normalizeText, normalizeImportText, parseImportNumber, parseImportDate,
     monthlyTotals, matchesSearch, daysBetween, backupStatus, dayLabel, groupByDay, categoryTotals,
     decodeBytes, parseBankDate, parseMoney, parseCSV, parseBankCSV, parseOFX,
     pdfItemsToLines, parsePdfStatement, guessCategory, guessForma, bankTransactions, markDuplicates,
+    NEUTRAL_CATEGORIES, isNeutral, parseInstallment, merchantKey, ruleKey, markInternalTransfers, importSanity,
+    monthSummary, installmentSchedule, dataWarnings, recategorize, applyCategoryToSimilar,
   };
 });

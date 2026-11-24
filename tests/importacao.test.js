@@ -179,12 +179,15 @@ test('guessCategory sugere categoria pelas palavras e evita falsos positivos', (
   assert.equal(lib.guessCategory('UBER *TRIP', 'Saída'), 'Transporte');
   assert.equal(lib.guessCategory('iFood Restaurante', 'Saída'), 'Alimentação');
   assert.equal(lib.guessCategory('Supermercado Bairro', 'Saída'), 'Alimentação');
-  assert.equal(lib.guessCategory('Mercado Livre', 'Saída'), 'Outros');
-  assert.equal(lib.guessCategory('Pagamento de fatura', 'Saída'), 'Cartão');
+  assert.equal(lib.guessCategory('Mercado Livre', 'Saída'), 'Compras');
+  assert.equal(lib.guessCategory('Pagamento de fatura', 'Saída'), 'Fatura paga');
   assert.equal(lib.guessCategory('Mensalidade Academia Smart', 'Saída'), 'Lazer');
   assert.equal(lib.guessCategory('Netflix.com', 'Saída'), 'Lazer');
   assert.equal(lib.guessCategory('Aluguel novembro', 'Saída'), 'Moradia');
-  assert.equal(lib.guessCategory('Pix enviado - Fulano', 'Saída'), 'Outros');
+  assert.equal(lib.guessCategory('Pix enviado - Fulano', 'Saída'), 'Transferências');
+  assert.equal(lib.guessCategory('Drogasil 123', 'Saída'), 'Saúde');
+  assert.equal(lib.guessCategory('Resgate RDB', 'Entrada'), 'Resgate');
+  assert.equal(lib.guessCategory('Loja Desconhecida', 'Saída'), 'Outros');
   assert.equal(lib.guessCategory('Pagamento de salário', 'Entrada'), 'Salário');
   assert.equal(lib.guessCategory('Crédito Alelo', 'Entrada'), 'VR');
   assert.equal(lib.guessCategory('Compra', 'Saída', 'transporte'), 'Transporte');
@@ -218,4 +221,106 @@ test('markDuplicates usa o identificador do banco e consome um existente por vez
     { data: '2026-11-08', valor: 9, tipo: 'Saída', descricao: 'Novo' },
   ];
   assert.deepEqual(lib.markDuplicates(existing, incoming).map((i) => i.duplicado), [true, true, false, false]);
+});
+
+test('parseInstallment reconhece parcelas em vários formatos e ignora o que não é parcela', () => {
+  assert.deepEqual(lib.parseInstallment('Magalu - Parcela 3/10'), { n: 3, total: 10 });
+  assert.deepEqual(lib.parseInstallment('LOJA X PARC 03 de 12'), { n: 3, total: 12 });
+  assert.deepEqual(lib.parseInstallment('Celular (2/6)'), { n: 2, total: 6 });
+  assert.deepEqual(lib.parseInstallment('Americanas 04/10'), { n: 4, total: 10 });
+  assert.equal(lib.parseInstallment('Parcela 11/10'), null);
+  assert.equal(lib.parseInstallment('Padaria Central'), null);
+});
+
+test('merchantKey ignora números, parcelas e palavras genéricas; regras aprendidas valem para o mesmo estabelecimento', () => {
+  assert.equal(lib.merchantKey('Compra no débito - Padaria do João 1234'), 'padaria joao');
+  assert.equal(lib.merchantKey('Magalu - Parcela 3/10'), 'magalu');
+  const rules = { [lib.ruleKey('Padaria do João', 'Saída')]: 'Lazer' };
+  assert.equal(lib.guessCategory('Compra no débito - Padaria do João 99', 'Saída', '', rules), 'Lazer');
+  assert.equal(lib.guessCategory('Compra no débito - Padaria do João 99', 'Saída'), 'Alimentação');
+});
+
+test('pagamento de fatura e transferência própria ficam neutros e não entram em entradas, saídas nem categorias', () => {
+  const raw = [
+    { data: '2026-11-05', valor: -4000, descricao: 'Pagamento de fatura Nubank' },
+    { data: '2026-11-06', valor: -500, descricao: 'Transferência enviada - Dhiego Exemplo' },
+    { data: '2026-11-06', valor: 500, descricao: 'Transferência recebida - Dhiego Exemplo' },
+    { data: '2026-11-07', valor: -120, descricao: 'Pix enviado - Maria Silva' },
+    { data: '2026-11-08', valor: 3000, descricao: 'Pagamento de salário' },
+  ];
+  const list = lib.bankTransactions(raw).map((t, i) => ({ ...t, id: String(i) }));
+  assert.deepEqual(list.map((t) => t.categoria), ['Fatura paga', 'Transferência própria', 'Transferência própria', 'Transferências', 'Salário']);
+  const s = lib.monthSummary(list, '2026-11');
+  assert.equal(s.entradas, 3000);
+  assert.equal(s.saidas, 120);
+  assert.equal(s.emConta, 3000 - 4000 - 500 + 500 - 120); // o que mexeu na conta de fato
+  assert.deepEqual(lib.categoryTotals(list, '2026-11').map((c) => c.categoria), ['Transferências']);
+  assert.equal(lib.monthlyTotals(list, '2026-11', 1)[0].saidas, 120);
+});
+
+test('monthSummary separa o que foi no cartão do que saiu da conta', () => {
+  const t = [
+    { id: '1', data: '2026-11-02', valor: 3000, tipo: 'Entrada', categoria: 'Salário', forma: 'Pix' },
+    { id: '2', data: '2026-11-03', valor: 200, tipo: 'Saída', categoria: 'Alimentação', forma: 'Débito' },
+    { id: '3', data: '2026-11-04', valor: 800, tipo: 'Saída', categoria: 'Compras', forma: 'Crédito' },
+  ];
+  const s = lib.monthSummary(t, '2026-11');
+  assert.deepEqual([s.entradas, s.saidas, s.resultado, s.noCartao, s.emConta], [3000, 1000, 2000, 800, 2800]);
+});
+
+test('dataWarnings avisa mês só de cartão, contagem em dobro da fatura e excesso de "Outros"', () => {
+  const soCartao = [{ id: 'a', data: '2026-11-04', valor: 4000, tipo: 'Saída', categoria: 'Compras', forma: 'Crédito', descricao: 'Loja' }];
+  const w1 = lib.dataWarnings(soCartao, '2026-11');
+  assert.equal(w1[0].id, 'sem-entradas');
+  assert.ok(/no cartão/.test(w1[0].text));
+  const dobro = [
+    { id: 'b', data: '2026-11-05', valor: 1000, tipo: 'Saída', categoria: 'Cartão', forma: 'Débito', descricao: 'Pagamento fatura cartão' },
+    { id: 'c', data: '2026-11-02', valor: 900, tipo: 'Saída', categoria: 'Compras', forma: 'Crédito', descricao: 'Loja' },
+    { id: 'd', data: '2026-11-01', valor: 3000, tipo: 'Entrada', categoria: 'Salário', forma: 'Pix', descricao: 'Salário' },
+  ];
+  const w2 = lib.dataWarnings(dobro, '2026-11').find((w) => w.id === 'dupla-contagem');
+  assert.deepEqual(w2.fixIds, ['b']);
+  const outros = [{ id: 'e', data: '2026-11-01', valor: 100, tipo: 'Entrada', categoria: 'Salário', forma: 'Pix' }, { id: 'f', data: '2026-11-02', valor: 50, tipo: 'Saída', categoria: 'Outros', forma: 'Débito' }];
+  assert.ok(lib.dataWarnings(outros, '2026-11').some((w) => w.id === 'muito-outros'));
+});
+
+test('installmentSchedule projeta as parcelas que faltam a partir da última parcela vista', () => {
+  const t = [
+    { data: '2026-10-10', valor: 100, tipo: 'Saída', descricao: 'Magalu - Parcela 2/5', categoria: 'Compras' },
+    { data: '2026-11-10', valor: 100, tipo: 'Saída', descricao: 'Magalu - Parcela 3/5', categoria: 'Compras' },
+    { data: '2026-11-12', valor: 50, tipo: 'Saída', descricao: 'Celular 1/2', categoria: 'Celular' },
+  ];
+  const r = lib.installmentSchedule(t, '2026-11');
+  assert.deepEqual(r.meses, [{ month: '2026-12', total: 150 }, { month: '2027-01', total: 100 }]);
+  assert.equal(r.total, 250);
+  assert.deepEqual(r.itens.map((i) => [i.descricao, i.restantes]), [['Magalu - Parcela 3/5', 2], ['Celular 1/2', 1]]);
+});
+
+test('recategorize e applyCategoryToSimilar só mexem no que deve', () => {
+  const t = [
+    { id: '1', descricao: 'Drogasil 1', tipo: 'Saída', categoria: 'Outros' },
+    { id: '2', descricao: 'Coisa estranha', tipo: 'Saída', categoria: 'Outros' },
+    { id: '3', descricao: 'Padaria', tipo: 'Saída', categoria: 'Lazer' },
+  ];
+  const r = lib.recategorize(t);
+  assert.equal(r.changed, 1);
+  assert.deepEqual(r.transactions.map((x) => x.categoria), ['Saúde', 'Outros', 'Lazer']);
+  const base = [{ id: 'a', descricao: 'Padaria Central 1', tipo: 'Saída', categoria: 'Outros' }, { id: 'b', descricao: 'Compra - Padaria Central 22', tipo: 'Saída', categoria: 'Outros' }, { id: 'c', descricao: 'Mercado X', tipo: 'Saída', categoria: 'Outros' }];
+  const a = lib.applyCategoryToSimilar(base, base[0], 'Alimentação');
+  assert.equal(a.changed, 1);
+  assert.deepEqual(a.transactions.map((x) => x.categoria), ['Outros', 'Alimentação', 'Outros']);
+});
+
+test('importSanity avisa conta tratada como fatura, só saídas e parcelas sem marcar fatura', () => {
+  const conta = lib.bankTransactions([{ data: '2026-11-03', valor: 3000, descricao: 'Pagamento de salário' }, { data: '2026-11-04', valor: -30, descricao: 'Padaria' }]);
+  assert.ok(lib.importSanity(conta, { isCard: true }).some((w) => /extrato de conta/.test(w)));
+  const soSaidas = lib.bankTransactions([1, 2, 3, 4].map((i) => ({ data: '2026-11-0' + i, valor: -10 * i, descricao: 'Compra ' + i })));
+  assert.ok(lib.importSanity(soSaidas).some((w) => /Só há saídas/.test(w)));
+  const parcelas = lib.bankTransactions([1, 2, 3, 4].map((i) => ({ data: '2026-11-0' + i, valor: -10 * i, descricao: 'Loja ' + i + ' Parcela 2/10' })));
+  assert.ok(lib.importSanity(parcelas).some((w) => /fatura de cartão/.test(w)));
+});
+
+test('PDF de conta que cita "pagamento de fatura" não é confundido com fatura de cartão', () => {
+  const r = lib.parsePdfStatement(['Extrato conta corrente', 'Saldo anterior 100,00', '03/11/2026 Pagamento de fatura cartão -500,00', 'Limite disponível 300,00']);
+  assert.equal(r.cardHint, false);
 });

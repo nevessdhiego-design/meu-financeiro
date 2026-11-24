@@ -85,7 +85,7 @@
 
       <div class="homeGrid">
         <article class="hero" aria-label="Saldo do mês">
-          <div class="heroLabel">Saldo de <span id="heroMonth">—</span></div>
+          <div class="heroLabel">Resultado de <span id="heroMonth">—</span></div>
           <div class="heroValue money" id="hSaldo">R$ 0,00</div>
           <div class="heroPill" id="heroPill"></div>
           <svg class="spark" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
@@ -97,6 +97,12 @@
             <div><span class="dot in"></span><small>Entradas</small><strong class="money" id="hEntradas">R$ 0,00</strong></div>
             <div><span class="dot out"></span><small>Saídas</small><strong class="money" id="hSaidas">R$ 0,00</strong></div>
           </div>
+          <div class="heroNote" id="heroNote"></div>
+        </article>
+
+        <article class="panel insights" id="insightsPanel" hidden>
+          <h3>Atenção</h3>
+          <div id="insightList"></div>
         </article>
 
         <article class="panel planned">
@@ -134,6 +140,10 @@
           <div class="meter">
             <div class="meterHead"><span>Parcelas do celular</span><b id="gParcelas">—</b></div>
             <div class="meterInfo money" id="gParcelasInfo"></div>
+          </div>
+          <div class="meter" id="parcelasFuturas" hidden>
+            <div class="meterHead"><span>Parcelas já lançadas a vencer</span><b class="money" id="pfTotal">—</b></div>
+            <div id="pfList" class="pfList"></div>
           </div>
         </article>
 
@@ -187,6 +197,16 @@
         <div id="budgetChart"></div>
       </article>
 
+      <h4 class="groupTitle">Metas por categoria</h4>
+      <div class="group" id="metasGroup">
+        <div id="metasList"></div>
+        <div class="row metaAdd">
+          <select id="metaCat" aria-label="Categoria da meta"></select>
+          <i class="unit">R$</i><input type="number" id="metaValor" inputmode="decimal" step="any" placeholder="0" aria-label="Valor da meta">
+          <button type="button" class="btn" id="btnAddMeta">Adicionar</button>
+        </div>
+      </div>
+
       <h4 class="groupTitle">Renda</h4>
       <div class="group">
         <label class="row"><span>Salário mensal</span><i class="unit">R$</i><input type="number" id="cfgSalario" inputmode="decimal" step="any"></label>
@@ -237,7 +257,9 @@
           <option>Salário</option><option>VR</option><option>VT</option><option>Moradia</option>
           <option>Faculdade</option><option>Celular</option><option>Cartão</option><option>Lazer</option>
           <option>Investimentos</option><option>Reserva</option><option>Transporte</option>
-          <option>Alimentação</option><option>Outros</option>
+          <option>Alimentação</option><option>Saúde</option><option>Compras</option><option>Taxas e impostos</option>
+          <option>Transferências</option><option>Rendimentos</option><option>Fatura paga</option><option>Transferência própria</option>
+          <option>Resgate</option><option>Outros</option>
         </select>
       </label>
       <label class="row"><span>Data</span><input type="date" id="data"></label>
@@ -260,6 +282,7 @@
     <button type="button" class="row action" id="btnBackupJson"><svg class="ic"><use href="#i-shield"/></svg><span>Fazer backup<small id="backupSub">Salva um arquivo JSON (Arquivos, iCloud)</small></span></button>
     <button type="button" class="row action" id="btnRestoreJson"><svg class="ic"><use href="#i-restore"/></svg><span>Restaurar backup<small>Lê um arquivo JSON e mostra a prévia</small></span></button>
     <button type="button" class="row action" id="btnImport"><svg class="ic"><use href="#i-download"/></svg><span>Importar extrato ou planilha<small>.ofx ou .csv do banco, ou .xlsx</small></span></button>
+    <button type="button" class="row action" id="btnReanalisar"><svg class="ic"><use href="#i-flask"/></svg><span>Reanalisar categorias<small>Reclassifica os lançamentos em "Outros" com o que o app já sabe</small></span></button>
     <button type="button" class="row action" id="btnExport"><svg class="ic"><use href="#i-upload"/></svg><span>Exportar planilha<small>Todos os lançamentos em .xlsx</small></span></button>
   </div>
   <h4 class="groupTitle">Aparência</h4>

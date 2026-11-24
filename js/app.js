@@ -2,7 +2,8 @@
    Os dados ficam só no navegador (localStorage). As funções puras estão em lib.js (window.FinLib). */
 const { fmt, pct, escapeHtml, pad2, todayISO, curMonth, shiftMonth, monthLabel, monthShort, normalizeImportText,
         parseImportNumber, parseImportDate, monthlyTotals, matchesSearch, backupStatus,
-        dayLabel, groupByDay, categoryTotals } = FinLib;
+        dayLabel, groupByDay, categoryTotals, monthSummary, installmentSchedule, dataWarnings, recategorize,
+        applyCategoryToSimilar, isNeutral, parseInstallment, ruleKey, guessCategory, importSanity } = FinLib;
 
 let transactions = [];
 let editingId = null;
@@ -12,11 +13,12 @@ let pendingRestore = null;
 let firstUseMonthValue = null; // mantido só para compatibilidade com backups antigos
 let selectedMonth = curMonth();
 let tipoFilter = '';
+let categoryRules = {}; // categorias que o Dhiego ensinou: { 'Saída:padaria joao': 'Alimentação' }
 
 // Valores iniciais fictícios: o app não traz dados reais de ninguém.
 const DEFAULT_CONFIG = {
   salario:3200, dias:22, vr:28, vt:12, faculdade:650, celular:180, parcelasRestantes:8, cartao:800,
-  lazer:400, investAlvo:300, metaReserva:10000, metaPatrim:100000, reservaAtual:2500, patrimAtual:0
+  lazer:400, investAlvo:300, metaReserva:10000, metaPatrim:100000, reservaAtual:2500, patrimAtual:0, metas:{}
 };
 let config = {...DEFAULT_CONFIG};
 const STORAGE_KEY = 'meu-financeiro-v1';
@@ -32,10 +34,11 @@ function loadLocalState(){
     if(saved.config) config = {...config, ...saved.config};
     if(Array.isArray(saved.transactions)) transactions = saved.transactions;
     if(saved.firstUseMonth) firstUseMonthValue = saved.firstUseMonth;
+    if(saved.rules && typeof saved.rules==='object') categoryRules = saved.rules;
   }catch(e){ console.warn('Não foi possível ler os dados locais', e); }
 }
 function saveLocalState(){
-  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({config,transactions,firstUseMonth:firstUseMonthValue})); }
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({config,transactions,firstUseMonth:firstUseMonthValue,rules:categoryRules})); }
   catch(e){ console.warn('Não foi possível salvar os dados locais', e); }
 }
 
@@ -49,7 +52,9 @@ const CATS = {
   'Salário':['💼','#0e9f6e'], 'VR':['🍽️','#f59e0b'], 'VT':['🚌','#0ea5e9'], 'Moradia':['🏠','#8b5cf6'],
   'Faculdade':['🎓','#6366f1'], 'Celular':['📱','#64748b'], 'Cartão':['💳','#ef4444'], 'Lazer':['🎬','#ec4899'],
   'Investimentos':['📈','#10b981'], 'Reserva':['🛡️','#14b8a6'], 'Transporte':['🚗','#f97316'],
-  'Alimentação':['🛒','#eab308'], 'Outros':['🧾','#94a3b8']
+  'Alimentação':['🛒','#eab308'], 'Outros':['🧾','#94a3b8'],
+  'Saúde':['💊','#06b6d4'], 'Compras':['🛍️','#d946ef'], 'Taxas e impostos':['🏛️','#78716c'], 'Transferências':['🔁','#64748b'],
+  'Rendimentos':['🪙','#22c55e'], 'Fatura paga':['💳','#94a3b8'], 'Transferência própria':['↔️','#94a3b8'], 'Resgate':['🏦','#94a3b8']
 };
 function catMeta(category){
   if(CATS[category]) return {emoji:CATS[category][0], color:CATS[category][1]};
@@ -103,8 +108,17 @@ segTipo.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{
   setTipo(b.dataset.v);
 }));
 
+let categoriaTouched = false;
+const r2ms = msg => msg.length>40 ? 4200 : 2200;
+categoria.addEventListener('change', ()=>{ categoriaTouched = true; });
+desc.addEventListener('input', ()=>{
+  if(editingId || categoriaTouched) return;
+  const guess = guessCategory(desc.value, tipo.value, '', categoryRules);
+  if(guess!=='Outros' && [...categoria.options].some(o=>o.value===guess)) categoria.value = guess;
+});
+
 function openForm(){
-  editingId = null; form.reset(); setTipo('Saída'); categoria.value = DEFAULT_CAT['Saída']; pago.value = 'Sim'; data.value = todayISO();
+  editingId = null; categoriaTouched = false; form.reset(); setTipo('Saída'); categoria.value = DEFAULT_CAT['Saída']; pago.value = 'Sim'; data.value = todayISO();
   modalTitle.textContent = 'Novo lançamento'; btnSubmit.textContent = 'Salvar lançamento'; btnDeleteTx.hidden = true;
   transactionModal.showModal();
   setTimeout(()=>valor.focus(), 60);
@@ -118,6 +132,7 @@ function startEdit(id){
   editingId = id;
   data.value = t.data||'';
   setTipo(t.tipo==='Entrada' ? 'Entrada' : 'Saída');
+  if(![...categoria.options].some(o=>o.value===t.categoria)) categoria.add(new Option(t.categoria));
   categoria.value = t.categoria; desc.value = t.descricao;
   valor.value = t.valor; forma.value = t.forma; pago.value = t.pago;
   btnSubmit.textContent = 'Salvar alterações'; btnDeleteTx.hidden = false;
@@ -154,7 +169,20 @@ form.addEventListener('submit', e=>{
   if(!d || isNaN(v)) return;
   const payload = { descricao:d, valor:v, tipo:tipo.value, categoria:categoria.value, forma:forma.value,
     pago:pago.value, data: data.value || todayISO() };
-  if(editingId){ updateTransaction(editingId, payload); editingId = null; showToast('Lançamento atualizado ✓'); }
+  if(editingId){
+    const old = transactions.find(x=>x.id===editingId);
+    const id = editingId;
+    updateTransaction(id, payload); editingId = null;
+    let msg = 'Lançamento atualizado ✓';
+    if(old && old.categoria!==payload.categoria){
+      const key = ruleKey(d, payload.tipo);
+      if(key.length>8) categoryRules = {...categoryRules, [key]:payload.categoria};
+      const r = applyCategoryToSimilar(transactions, {...payload, id}, payload.categoria);
+      if(r.changed){ transactions = r.transactions; msg += ` · "${payload.categoria}" aplicada a mais ${r.changed} parecido(s)`; }
+      saveLocalState(); render();
+    }
+    showToast(msg, r2ms(msg));
+  }
   else { addTransaction(payload); showToast('Lançamento salvo ✓'); }
   transactionModal.close();
 });
@@ -193,7 +221,7 @@ function fillCfgForm(){
 btnSaveCfg.addEventListener('click', ()=>{
   const n = el => parseFloat(el.value)||0;
   config = {
-    salario:n(cfgSalario), dias:n(cfgDias), vr:n(cfgVr), vt:n(cfgVt), faculdade:n(cfgFaculdade), celular:n(cfgCelular),
+    ...config, salario:n(cfgSalario), dias:n(cfgDias), vr:n(cfgVr), vt:n(cfgVt), faculdade:n(cfgFaculdade), celular:n(cfgCelular),
     parcelasRestantes:n(cfgParcelasRestantes), cartao:n(cfgCartao), lazer:n(cfgLazer), investAlvo:n(cfgInvestAlvo),
     metaReserva:n(cfgMetaReserva), metaPatrim:n(cfgMetaPatrim), reservaAtual:n(cfgReservaAtual), patrimAtual:n(cfgPatrimAtual)
   };
@@ -211,7 +239,7 @@ function setRing(ringEl, textEl, ratio){
 
 function renderSaldoChart(list){
   const line = $('saldoChartLine'), area = $('saldoChartArea');
-  const ordered = [...list].sort((a,b)=> (a.data||'').localeCompare(b.data||''));
+  const ordered = list.filter(t=>!isNeutral(t)).sort((a,b)=> (a.data||'').localeCompare(b.data||''));
   if(!ordered.length){
     line.setAttribute('d','M0 22 L100 22');
     area.setAttribute('d','M0 22 L100 22 L100 44 L0 44 Z');
@@ -236,10 +264,12 @@ function renderSaldoChart(list){
 
 function renderGeral(){
   const monthList = transactions.filter(t=>(t.data||'').startsWith(selectedMonth));
-  const entradas = sum(monthList, t=>t.tipo==='Entrada' ? (Number(t.valor)||0) : 0);
-  const saidas = sum(monthList, t=>t.tipo==='Entrada' ? 0 : (Number(t.valor)||0));
+  const S = monthSummary(transactions, selectedMonth);
+  const entradas = S.entradas, saidas = S.saidas;
   heroMonth.textContent = monthLabel(selectedMonth);
-  hSaldo.textContent = fmt(entradas-saidas);
+  hSaldo.textContent = fmt(S.resultado);
+  heroNote.innerHTML = S.count
+    ? `No cartão: <b class="money">${fmt(S.noCartao)}</b> (só sai da conta quando a fatura é paga) · Movimento da conta: <b class="money">${fmt(S.emConta)}</b>` : '';
   hEntradas.textContent = fmt(entradas); hSaidas.textContent = fmt(saidas);
   heroPill.textContent = entradas>0
     ? (saidas>entradas ? 'Saídas acima das entradas' : `${pct(saidas/entradas)} das entradas gastas`)
@@ -259,7 +289,7 @@ function renderGeral(){
   setRing(gPatrimRing, gPatrimPct, pRaw);
   gPatrimInfo.textContent = `${fmt(config.patrimAtual)} de ${fmt(config.metaPatrim)}`;
 
-  const cartaoGasto = sum(monthList, t=>(t.tipo==='Saída' && t.forma==='Crédito') ? (Number(t.valor)||0) : 0);
+  const cartaoGasto = sum(monthList, t=>(t.tipo==='Saída' && t.forma==='Crédito' && !isNeutral(t)) ? (Number(t.valor)||0) : 0);
   const cPct = config.cartao>0 ? Math.min(cartaoGasto/config.cartao,1) : 0;
   gCartaoPct.textContent = pct(cPct);
   gCartaoBar.style.width = (cPct*100)+'%';
@@ -272,6 +302,8 @@ function renderGeral(){
     ? `Cerca de ${fmt(config.celular*config.parcelasRestantes)} a pagar (${fmt(config.celular)} por mês)` : 'Celular quitado';
 
   renderCategories();
+  renderInsights();
+  renderParcelas();
   renderRecent(monthList);
   welcomeCard.hidden = transactions.length>0;
 }
@@ -302,11 +334,12 @@ catList.addEventListener('click', e=>{
 function txItem(t){
   const m = catMeta(t.categoria);
   const entrada = t.tipo==='Entrada';
-  return `<button type="button" class="tx" data-id="${escapeHtml(t.id)}" style="--c:${m.color}">`
+  const neutro = isNeutral(t), inst = parseInstallment(t.descricao);
+  return `<button type="button" class="tx${neutro?' neutral':''}" data-id="${escapeHtml(t.id)}" style="--c:${m.color}">`
     + `<span class="txIcon" aria-hidden="true">${m.emoji}</span>`
     + `<span class="txBody"><span class="txDesc">${escapeHtml(t.descricao||'')}</span>`
-    + `<span class="txMeta">${escapeHtml(t.categoria||'—')}${t.forma ? ' · '+escapeHtml(t.forma) : ''}${t.pago==='Não' ? '<em class="badge">Não pago</em>' : ''}</span></span>`
-    + `<span class="txVal money ${entrada?'pos':''}">${entrada?'+':'−'} ${fmt(Math.abs(Number(t.valor)||0))}</span></button>`;
+    + `<span class="txMeta">${escapeHtml(t.categoria||'—')}${t.forma ? ' · '+escapeHtml(t.forma) : ''}${t.pago==='Não' ? '<em class="badge">Não pago</em>' : ''}${inst ? `<em class="badge parc">${inst.n}/${inst.total}</em>` : ''}${neutro ? '<em class="badge neutro">não conta</em>' : ''}</span></span>`
+    + `<span class="txVal money ${entrada&&!neutro?'pos':''}">${neutro?'↔':entrada?'+':'−'} ${fmt(Math.abs(Number(t.valor)||0))}</span></button>`;
 }
 function sortRecentFirst(list){
   return list.map((t,i)=>[t,i]).sort((a,b)=> (b[0].data||'').localeCompare(a[0].data||'') || b[1]-a[1]).map(x=>x[0]);
@@ -376,7 +409,7 @@ function renderLancamentos(){
   let entradas = 0, saidas = 0, naoPago = 0;
   for(const t of filtered){
     const v = Number(t.valor)||0;
-    if(t.tipo==='Entrada') entradas += v; else saidas += v;
+    if(!isNeutral(t)){ if(t.tipo==='Entrada') entradas += v; else saidas += v; }
     if(t.pago==='Não') naoPago++;
   }
   vSaldo.textContent = fmt(entradas-saidas); vEntradas.textContent = fmt(entradas); vSaidas.textContent = fmt(saidas);
@@ -394,13 +427,15 @@ function renderLancamentos(){
 }
 
 // ---- Planejar: orçamento restante ----
+const FIXED_TARGETS = ['Faculdade','Celular','Cartão','Lazer','Investimentos'];
+const META_CATS = ['Moradia','Alimentação','Transporte','Saúde','Compras','Taxas e impostos','Transferências','Reserva','Outros'];
 function renderBudgetChart(){
-  const targets = {Faculdade:config.faculdade, Celular:config.celular, Cartão:config.cartao, Lazer:config.lazer, Investimentos:config.investAlvo};
+  const targets = {Faculdade:config.faculdade, Celular:config.celular, Cartão:config.cartao, Lazer:config.lazer, Investimentos:config.investAlvo, ...(config.metas||{})};
   const spent = {};
-  transactions.filter(t=>t.tipo==='Saída'&&(t.data||'').startsWith(selectedMonth)).forEach(t=>{
-    spent[t.categoria] = (spent[t.categoria]||0) + (Number(t.valor)||0);
-  });
-  budgetChart.innerHTML = Object.entries(targets).map(([category,target])=>{
+  const monthOut = transactions.filter(t=>t.tipo==='Saída'&&!isNeutral(t)&&(t.data||'').startsWith(selectedMonth));
+  monthOut.forEach(t=>{ const c = t.categoria||'Outros'; spent[c] = (spent[c]||0) + (Number(t.valor)||0); });
+  spent['Cartão'] = sum(monthOut, t=>t.forma==='Crédito' ? (Number(t.valor)||0) : 0); // o teto do cartão vale para tudo que foi no crédito
+  const rows = Object.entries(targets).map(([category,target])=>{
     const used = spent[category]||0;
     const ratio = target>0 ? used/target : 0;
     const remaining = target-used;
@@ -412,6 +447,69 @@ function renderBudgetChart(){
       + `<small class="money ${state}">${text}</small></div>`
       + `<div class="bar"><div class="${fillCls}" style="width:${Math.min(ratio,1)*100}%"></div></div></div>`;
   }).join('');
+  const semMeta = Object.entries(spent).filter(([c,v])=>v>0 && !(c in targets)).sort((a,b)=>b[1]-a[1]);
+  budgetChart.innerHTML = rows + (semMeta.length
+    ? `<div class="budgetExtra">Gastos sem meta neste mês: ${semMeta.slice(0,6).map(([c,v])=>`${escapeHtml(c)} <span class="money">${fmt(v)}</span>`).join(' · ')}. Crie uma meta abaixo.</div>` : '');
+}
+
+// ---- Metas por categoria ----
+function renderMetas(){
+  const metas = config.metas || {};
+  metasList.innerHTML = Object.entries(metas).map(([c,v])=>
+    `<div class="metaRow"><span>${escapeHtml(c)}</span><b class="money">${fmt(v)}</b><button type="button" data-meta="${escapeHtml(c)}" aria-label="Remover meta de ${escapeHtml(c)}">✕</button></div>`).join('');
+  const used = new Set([...FIXED_TARGETS, ...Object.keys(metas)]);
+  const extra = [...new Set(transactions.filter(t=>t.tipo==='Saída'&&!isNeutral(t)).map(t=>t.categoria).filter(Boolean))];
+  const options = [...new Set([...META_CATS, ...extra])].filter(c=>!used.has(c));
+  const cur = metaCat.value;
+  metaCat.innerHTML = options.map(c=>`<option>${escapeHtml(c)}</option>`).join('');
+  if(options.includes(cur)) metaCat.value = cur;
+  btnAddMeta.disabled = !options.length;
+}
+btnAddMeta.addEventListener('click', ()=>{
+  const v = parseFloat(metaValor.value);
+  if(!metaCat.value || !(v>0)){ showToast('Escolha a categoria e o valor da meta'); return; }
+  config = {...config, metas:{...(config.metas||{}), [metaCat.value]:v}};
+  metaValor.value = ''; saveLocalState(); render(); showToast('Meta adicionada ✓');
+});
+metasList.addEventListener('click', e=>{
+  const b = e.target.closest('button[data-meta]'); if(!b) return;
+  const metas = {...(config.metas||{})}; delete metas[b.dataset.meta];
+  config = {...config, metas}; saveLocalState(); render();
+});
+
+// ---- Atenção: o que não bate nos números ----
+function renderInsights(){
+  const warns = dataWarnings(transactions, selectedMonth);
+  insightsPanel.hidden = !warns.length;
+  insightList.innerHTML = warns.map(w=>{
+    const label = w.fix==='fatura-paga' ? 'Corrigir' : w.fix==='reanalisar' ? 'Reanalisar' : '';
+    return `<div class="insight ${w.level}"><span>${escapeHtml(w.text)}</span>`
+      + (label ? `<button type="button" data-fix="${w.fix}" data-ids="${escapeHtml((w.fixIds||[]).join(','))}">${label}</button>` : '') + '</div>';
+  }).join('');
+}
+insightList.addEventListener('click', e=>{
+  const b = e.target.closest('button[data-fix]'); if(!b) return;
+  if(b.dataset.fix==='fatura-paga'){
+    const ids = new Set(b.dataset.ids.split(',').filter(Boolean));
+    transactions = transactions.map(t=>ids.has(t.id) ? {...t, categoria:'Fatura paga'} : t);
+    saveLocalState(); render(); showToast('Pagamento da fatura marcado: não conta mais em dobro ✓');
+  }else if(b.dataset.fix==='reanalisar') reanalisar();
+});
+function reanalisar(){
+  const r = recategorize(transactions, categoryRules);
+  transactions = r.transactions; saveLocalState(); render();
+  showToast(r.changed ? `${r.changed} lançamento(s) reclassificado(s) ✓` : 'Nada novo para reclassificar', 3200);
+}
+btnReanalisar.addEventListener('click', ()=>{ moreSheet.close(); reanalisar(); });
+
+// ---- Parcelas já lançadas que ainda vão vencer ----
+function renderParcelas(){
+  const sch = installmentSchedule(transactions, selectedMonth);
+  parcelasFuturas.hidden = !sch.total;
+  if(!sch.total) return;
+  pfTotal.textContent = fmt(sch.total);
+  pfList.innerHTML = sch.meses.slice(0,4).map(m=>`<div><span>${escapeHtml(cap(monthShort(m.month))+' '+m.month.slice(0,4))}</span><b class="money">${fmt(m.total)}</b></div>`).join('')
+    + sch.itens.slice(0,3).map(i=>`<div><span>${escapeHtml(i.descricao)}</span><span>${i.restantes} restante${i.restantes===1?'':'s'}</span></div>`).join('');
 }
 
 // ---- Dados de exemplo (100% fictícios) ----
@@ -429,7 +527,7 @@ function buildSampleTransactions(month){
     ['Mercado do mês',            312.45, 'Saída',   'Alimentação',   'Débito',    'Sim', 14],
     ['Cinema e lanche',            86.9,  'Saída',   'Lazer',         'Crédito',   'Sim', 16],
     ['Transporte por aplicativo',  38.7,  'Saída',   'Transporte',    'Crédito',   'Sim', 18],
-    ['Fatura do cartão',          420,    'Saída',   'Cartão',        'Crédito',   'Não', 20],
+    ['Pagamento da fatura',       420,    'Saída',   'Fatura paga',   'Pix',       'Não', 20],
     ['Aporte mensal',             300,    'Saída',   'Investimentos', 'Pix',       'Sim', 21],
   ];
   return rows.map(([descricao,valor,tipo,categoria,forma,pago,dia],i)=>({
@@ -468,7 +566,7 @@ function updateBackupChip(){
     : s.days===0 ? 'Último backup: hoje' : `Último backup: há ${s.days} dia${s.days===1?'':'s'}`;
 }
 async function doBackup(){
-  const backup = {version:1, exportedAt:new Date().toISOString(), config, transactions, firstUseMonth:firstUseMonthValue};
+  const backup = {version:1, exportedAt:new Date().toISOString(), config, transactions, firstUseMonth:firstUseMonthValue, rules:categoryRules};
   const content = JSON.stringify(backup,null,2);
   const name = `meu-financeiro-backup-${todayISO()}.json`;
   try{
@@ -514,6 +612,7 @@ btnConfirmRestore.addEventListener('click', ()=>{
   config = {...config, ...pendingRestore.config};
   transactions = pendingRestore.transactions;
   if(pendingRestore.firstUseMonth) firstUseMonthValue = pendingRestore.firstUseMonth;
+  categoryRules = pendingRestore.rules && typeof pendingRestore.rules==='object' ? pendingRestore.rules : {};
   saveLocalState();
   pendingRestore = null;
   restoreModal.close();
@@ -616,7 +715,7 @@ function readXlsx(buf){
 function buildImportList(){
   if(!importSource) return [];
   const list = importSource.kind==='xlsx' ? importSource.items
-    : bankTransactions(importSource.parsed.items, {invert:importInvert.checked, isCard:importCard.checked});
+    : bankTransactions(importSource.parsed.items, {invert:importInvert.checked, isCard:importCard.checked, rules:categoryRules});
   importIgnored = importSource.kind==='xlsx' ? 0 : importSource.parsed.items.length - list.length;
   return markDuplicates(transactions, list);
 }
@@ -625,8 +724,9 @@ function renderImportPreview(){
   const fresh = all.filter(i=>!i.duplicado);
   const dups = all.length - fresh.length;
   pendingImport = fresh;
-  const totalIn = sum(fresh, t=>t.tipo==='Entrada' ? (Number(t.valor)||0) : 0);
-  const totalOut = sum(fresh, t=>t.tipo==='Entrada' ? 0 : (Number(t.valor)||0));
+  const totalIn = sum(fresh, t=>(t.tipo==='Entrada' && !isNeutral(t)) ? (Number(t.valor)||0) : 0);
+  const totalOut = sum(fresh, t=>(t.tipo==='Entrada' || isNeutral(t)) ? 0 : (Number(t.valor)||0));
+  const warns = importSource && importSource.kind==='bank' ? importSanity(fresh, {isCard:importCard.checked}) : [];
   const pdfParsed = importSource && importSource.pdf ? importSource.parsed : null;
   const ignoredText = (importIgnored ? ` ${importIgnored} pagamento(s) de fatura ignorado(s), pois já aparecem como saída na conta.` : '')
     + (pdfParsed ? ` PDF lido pelo texto: confira cada linha.` + (pdfParsed.uncertain ? ` Em ${pdfParsed.uncertain} item(ns) o PDF não indica entrada ou saída e marquei como saída.` : '') : '');
@@ -644,6 +744,7 @@ function renderImportPreview(){
     importSummary.textContent = `${fresh.length} lançamento(s) novo(s)` + (dups ? ` · ${dups} já existe(m) e será(ão) ignorado(s)` : '')
       + `. Entradas ${fmt(totalIn)}, saídas ${fmt(totalOut)}.${ignoredText} Confira antes de salvar; se estiver trocado, use as opções abaixo.`;
   }
+  importSummary.innerHTML = escapeHtml(importSummary.textContent) + warns.map(w=>`<br><b>⚠</b> ${escapeHtml(w)}`).join('');
   importPreview.innerHTML = fresh.length
     ? `<table class="previewTable"><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th></tr></thead><tbody>${fresh.slice(0,20).map(item=>`<tr><td>${escapeHtml(item.data ? item.data.slice(8,10)+'/'+item.data.slice(5,7) : '—')}</td><td>${escapeHtml(item.descricao)}</td><td>${escapeHtml(item.categoria)}</td><td>${item.tipo==='Entrada'?'+':'−'} ${fmt(item.valor)}</td></tr>`).join('')}</tbody></table>${fresh.length>20?'<div class="hint">Mostrando os 20 primeiros itens.</div>':''}`
     : '<div class="empty">Nada novo para importar.</div>';
@@ -778,6 +879,7 @@ function render(){
   renderEvolution();
   renderLancamentos();
   renderBudgetChart();
+  renderMetas();
   updateBackupChip();
 }
 
