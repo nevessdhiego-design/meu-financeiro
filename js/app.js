@@ -533,45 +533,106 @@ btnConfirmClear.addEventListener('click', ()=>{
   showToast('Lançamentos limpos ✓');
 });
 
-// ---- Planilhas ----
+// ---- Importação: extrato do banco (OFX ou CSV) ou planilha (.xlsx) ----
+const { decodeBytes, parseBankCSV, parseOFX, bankTransactions, markDuplicates } = FinLib;
+let importSource = null; // { kind:'bank', parsed } ou { kind:'xlsx', items }
+let importIgnored = 0;
+
 btnImport.addEventListener('click', ()=>{ moreSheet.close(); fileInput.click(); });
+
+function readXlsx(buf){
+  const wb = XLSX.read(buf, {type:'array', cellDates:true});
+  const sheetName = wb.SheetNames.find(n => normalizeImportText(n).includes('lancamento')) || wb.SheetNames[0];
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:''});
+  const items = [];
+  for(const row of rows){
+    const keys = Object.keys(row).reduce((acc,k)=>{acc[normalizeImportText(k)]=row[k];return acc;},{});
+    const descricao = keys.descricao || keys.descricao_do_lancamento || '';
+    const parsedValue = parseImportNumber(keys.valor ?? keys.valores ?? '');
+    if(!descricao || !Number.isFinite(parsedValue)) continue;
+    const tipoRaw = normalizeImportText(keys.tipo);
+    const tipoImportado = tipoRaw === 'saida' || tipoRaw === 'debito' ? 'Saída' : tipoRaw === 'entrada' ? 'Entrada' : (parsedValue<0 ? 'Saída' : 'Entrada');
+    const pagoRaw = normalizeImportText(keys.pago || keys.pago_sim_nao || 'sim');
+    items.push({ descricao:String(descricao).trim(), valor:Math.abs(parsedValue), tipo:tipoImportado,
+      categoria:String(keys.categoria || 'Outros').trim() || 'Outros', forma:String(keys.forma_de_pagamento || keys.forma || 'Outro').trim() || 'Outro',
+      pago:pagoRaw.startsWith('n') ? 'Não' : 'Sim', data:parseImportDate(keys.data) });
+  }
+  return items;
+}
+
+function buildImportList(){
+  if(!importSource) return [];
+  const list = importSource.kind==='xlsx' ? importSource.items
+    : bankTransactions(importSource.parsed.items, {invert:importInvert.checked, isCard:importCard.checked});
+  importIgnored = importSource.kind==='xlsx' ? 0 : importSource.parsed.items.length - list.length;
+  return markDuplicates(transactions, list);
+}
+function renderImportPreview(){
+  const all = buildImportList();
+  const fresh = all.filter(i=>!i.duplicado);
+  const dups = all.length - fresh.length;
+  pendingImport = fresh;
+  const totalIn = sum(fresh, t=>t.tipo==='Entrada' ? (Number(t.valor)||0) : 0);
+  const totalOut = sum(fresh, t=>t.tipo==='Entrada' ? 0 : (Number(t.valor)||0));
+  const ignoredText = importIgnored ? ` ${importIgnored} pagamento(s) de fatura ignorado(s), pois já aparecem como saída na conta.` : '';
+  if(!all.length && !importIgnored){
+    importSummary.textContent = importSource && importSource.kind==='bank'
+      ? 'Não encontrei lançamentos neste arquivo. No CSV é preciso ter colunas de data, descrição e valor.'
+      : 'Nenhum lançamento válido encontrado.';
+  }else if(!fresh.length){
+    importSummary.textContent = (dups ? `Os ${dups} lançamento(s) deste arquivo já estão no app. Nada novo para importar.` : 'Nada novo para importar.') + ignoredText;
+  }else{
+    importSummary.textContent = `${fresh.length} lançamento(s) novo(s)` + (dups ? ` · ${dups} já existe(m) e será(ão) ignorado(s)` : '')
+      + `. Entradas ${fmt(totalIn)}, saídas ${fmt(totalOut)}.${ignoredText} Confira antes de salvar; se estiver trocado, use as opções abaixo.`;
+  }
+  importPreview.innerHTML = fresh.length
+    ? `<table class="previewTable"><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th></tr></thead><tbody>${fresh.slice(0,20).map(item=>`<tr><td>${escapeHtml(item.data ? item.data.slice(8,10)+'/'+item.data.slice(5,7) : '—')}</td><td>${escapeHtml(item.descricao)}</td><td>${escapeHtml(item.categoria)}</td><td>${item.tipo==='Entrada'?'+':'−'} ${fmt(item.valor)}</td></tr>`).join('')}</tbody></table>${fresh.length>20?'<div class="hint">Mostrando os 20 primeiros itens.</div>':''}`
+    : '<div class="empty">Nada novo para importar.</div>';
+  btnConfirmImport.disabled = fresh.length===0;
+}
+importCard.addEventListener('change', renderImportPreview);
+importInvert.addEventListener('change', renderImportPreview);
+
 fileInput.addEventListener('change', async e=>{
-  const file = e.target.files[0]; if(!file) return;
+  const file = e.target.files[0]; e.target.value = '';
+  if(!file) return;
+  if(file.size > 8*1024*1024){ showToast('Arquivo grande demais (máximo 8 MB)'); return; }
   try{
+    const name = file.name.toLowerCase();
     const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, {type:'array', cellDates:true});
-    const sheetName = wb.SheetNames.find(n => normalizeImportText(n).includes('lancamento')) || wb.SheetNames[0];
-    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {defval:''});
-    pendingImport = [];
-    for(const row of rows){
-      const keys = Object.keys(row).reduce((acc,k)=>{acc[normalizeImportText(k)]=row[k];return acc;},{});
-      const descricao = keys.descricao || keys.descricao_do_lancamento || '';
-      const valorRaw = keys.valor ?? keys.valores ?? '';
-      const parsedValue = parseImportNumber(valorRaw);
-      if(!descricao || !Number.isFinite(parsedValue)) continue;
-      const tipoRaw = normalizeImportText(keys.tipo);
-      const tipoImportado = tipoRaw === 'saida' || tipoRaw === 'debito' ? 'Saída' : tipoRaw === 'entrada' ? 'Entrada' : (parsedValue<0 ? 'Saída' : 'Entrada');
-      const categoria = String(keys.categoria || 'Outros').trim() || 'Outros';
-      const forma = String(keys.forma_de_pagamento || keys.forma || 'Outro').trim() || 'Outro';
-      const pagoRaw = normalizeImportText(keys.pago || keys.pago_sim_nao || 'sim');
-      pendingImport.push({ descricao:String(descricao).trim(), valor:Math.abs(parsedValue), tipo:tipoImportado, categoria,
-        forma, pago:pagoRaw.startsWith('n') ? 'Não' : 'Sim', data:parseImportDate(keys.data) });
+    if(/\.(xlsx|xls)$/.test(name)){
+      importSource = {kind:'xlsx', items:readXlsx(buf)};
+      importOptions.hidden = true;
+    }else{
+      const text = decodeBytes(buf);
+      const parsed = /<OFX>|OFXHEADER/i.test(text) ? parseOFX(text) : parseBankCSV(text);
+      importSource = {kind:'bank', parsed};
+      importCard.checked = Boolean(parsed.cardHint);
+      importInvert.checked = Boolean(parsed.invertHint);
+      importOptions.hidden = false;
     }
-    importSummary.textContent = `${pendingImport.length} lançamento(s) válido(s) encontrado(s). Revise antes de salvar.`;
-    importPreview.innerHTML = pendingImport.length ? `<table class="previewTable"><thead><tr><th>Data</th><th>Descrição</th><th>Tipo</th><th>Valor</th></tr></thead><tbody>${pendingImport.slice(0,20).map(item=>`<tr><td>${escapeHtml(item.data||'—')}</td><td>${escapeHtml(item.descricao)}</td><td>${escapeHtml(item.tipo)}</td><td>${fmt(item.valor)}</td></tr>`).join('')}</tbody></table>${pendingImport.length>20?'<div class="hint">Mostrando os 20 primeiros itens.</div>':''}` : '<div class="empty">Nenhum lançamento válido encontrado.</div>';
-    btnConfirmImport.disabled = pendingImport.length===0;
+    renderImportPreview();
     importModal.showModal();
-  }catch(err){ console.error(err); showToast('Não foi possível importar a planilha'); }
-  e.target.value = '';
+  }catch(err){ console.error(err); showToast('Não foi possível ler o arquivo'); }
 });
-btnCancelImport.addEventListener('click', ()=>{ pendingImport=[]; importModal.close(); });
+btnCancelImport.addEventListener('click', ()=>{ pendingImport=[]; importSource=null; importModal.close(); });
 btnConfirmImport.addEventListener('click', ()=>{
-  const items = pendingImport; pendingImport=[];
-  items.forEach(item=>{ item.id = 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); transactions.push(item); });
-  saveLocalState(); render();
+  const items = pendingImport; pendingImport = []; importSource = null;
+  items.forEach((item,i)=>{
+    const {duplicado, ...t} = item;
+    t.id = 'tx_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2,6);
+    transactions.push(t);
+  });
+  saveLocalState();
+  const months = items.map(t=>(t.data||'').slice(0,7)).filter(Boolean).sort();
+  const target = months.includes(selectedMonth) ? selectedMonth : (months[months.length-1] || selectedMonth);
   importModal.close();
+  setMonth(target);
+  if(items.length) goTab('lanc');
   showToast(items.length ? `${items.length} lançamento(s) importado(s) ✓` : 'Nenhum lançamento importado');
 });
+
+// ---- Exportar planilha ----
 btnExport.addEventListener('click', ()=>{
   moreSheet.close();
   const sorted = [...transactions].sort((a,b)=> (a.data||'').localeCompare(b.data||''));

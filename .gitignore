@@ -1,6 +1,15 @@
 # Dados pessoais exportados pelo app: nunca versionar
 meu-financeiro-backup*.json
 
+# Extratos e faturas de banco (dados reais): nunca versionar. Só os exemplos fictícios de docs/exemplos/
+*.ofx
+*.qfx
+*.csv
+extrato*
+fatura*
+!docs/exemplos/
+!docs/exemplos/*
+
 # Banco local da API
 *.db
 

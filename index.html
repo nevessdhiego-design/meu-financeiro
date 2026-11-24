@@ -259,7 +259,7 @@
   <div class="group">
     <button type="button" class="row action" id="btnBackupJson"><svg class="ic"><use href="#i-shield"/></svg><span>Fazer backup<small id="backupSub">Salva um arquivo JSON (Arquivos, iCloud)</small></span></button>
     <button type="button" class="row action" id="btnRestoreJson"><svg class="ic"><use href="#i-restore"/></svg><span>Restaurar backup<small>Lê um arquivo JSON e mostra a prévia</small></span></button>
-    <button type="button" class="row action" id="btnImport"><svg class="ic"><use href="#i-download"/></svg><span>Importar planilha<small>.xlsx com data, descrição, valor e tipo</small></span></button>
+    <button type="button" class="row action" id="btnImport"><svg class="ic"><use href="#i-download"/></svg><span>Importar extrato ou planilha<small>.ofx ou .csv do banco, ou .xlsx</small></span></button>
     <button type="button" class="row action" id="btnExport"><svg class="ic"><use href="#i-upload"/></svg><span>Exportar planilha<small>Todos os lançamentos em .xlsx</small></span></button>
   </div>
   <h4 class="groupTitle">Aparência</h4>
@@ -310,12 +310,16 @@
 <dialog id="importModal" class="alert wideAlert">
   <strong>Prévia da importação</strong>
   <p id="importSummary"></p>
+  <div class="group importOptions" id="importOptions" hidden>
+    <label class="row"><span>É fatura de cartão de crédito</span><input type="checkbox" id="importCard"></label>
+    <label class="row"><span>Inverter entradas e saídas</span><input type="checkbox" id="importInvert"></label>
+  </div>
   <div class="previewScroll" id="importPreview"></div>
   <div class="alertActions"><button type="button" class="btn primary" id="btnConfirmImport">Salvar lançamentos</button><button type="button" class="btn soft" id="btnCancelImport">Cancelar</button></div>
 </dialog>
 
 <div id="toast" class="toast" role="status"></div>
-<input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+<input type="file" id="fileInput" accept=".ofx,.qfx,.csv,.txt,.xlsx,.xls" hidden>
 <input type="file" id="jsonInput" accept="application/json,.json" hidden>
 
 <noscript>Este aplicativo precisa de JavaScript para funcionar.</noscript>
