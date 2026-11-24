@@ -1,0 +1,14 @@
+# Dados pessoais exportados pelo app: nunca versionar
+meu-financeiro-backup*.json
+
+# Banco local da API
+*.db
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor
+.vscode/

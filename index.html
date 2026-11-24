@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meu Financeiro</title>
+<meta name="description" content="Controle financeiro pessoal: visão geral, lançamentos e planejamento. PWA offline; os dados ficam só no seu navegador.">
+<meta property="og:title" content="Meu Financeiro">
+<meta property="og:description" content="Controle financeiro pessoal em PWA offline, sem conta e sem servidor.">
+<meta name="theme-color" content="#05070f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="icone-financeiro.svg">
+<link rel="apple-touch-icon" sizes="192x192" href="icone-financeiro-192.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<h1>💰 Meu Financeiro</h1>
+<div class="sub">Salário, metas, planejamento e lançamentos num só lugar</div>
+<div class="demoBanner" id="demoBanner" hidden><span>🧪 Dados de exemplo (fictícios)</span><button type="button" id="btnExitDemo">Remover exemplo</button></div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="geral">Visão geral</div>
+  <div class="tab" data-tab="lanc">Lançamentos</div>
+  <div class="tab" data-tab="plan">Planejamento</div>
+</div>
+
+<!-- VISÃO GERAL -->
+<div class="view active" id="view-geral">
+  <div class="goal onboardingHint" id="monthHint" hidden>
+    <div class="top"><span><span class="goalIcon">🗓️</span>Comece pelo mês de uso</span></div>
+    <div class="info">Escolha o primeiro mês que deseja acompanhar para organizar seu planejamento.</div>
+    <button type="button" class="btn-primary" id="btnChooseMonth" style="margin-top:10px">Escolher mês</button>
+  </div>
+  <div class="cards">
+    <div class="card"><div class="label">Recursos do mês</div><div class="value" id="vRecursos">—</div></div>
+    <div class="card"><div class="label">Despesas fixas</div><div class="value" id="vDespesas">—</div></div>
+    <div class="card saldo"><div class="label">Saldo planejado</div><div class="value" id="vSaldoPlan">—</div></div>
+  </div>
+
+  <h2>Metas</h2>
+  <div class="overviewGoals reserveGroup">
+  <div class="goal reserveGoal" id="reservaCard" role="button" tabindex="0" onclick="showReservaModal()">
+    <span class="expandIcon">⤢</span>
+    <div class="top"><span><span class="goalIcon">🎯</span>Reserva de emergência</span><b id="gReservaPct">0%</b></div>
+    <div class="bar"><div id="gReservaBar" style="width:0%"></div></div>
+    <div class="info" id="gReservaInfo"></div>
+  </div>
+    <div class="goal">
+      <div class="top"><span><span class="goalIcon">🎯</span>Patrimônio (renda passiva)</span><b id="gPatrimPct">0%</b></div>
+      <div class="bar"><div id="gPatrimBar" style="width:0%"></div></div>
+      <div class="info" id="gPatrimInfo"></div>
+    </div>
+  </div>
+  <h2>Acompanhamento</h2>
+  <div class="overviewGoals followupGroup">
+  <div class="goal">
+    <div class="top"><span><span class="goalIcon">💳</span>Cartão — uso do teto (<span id="cartaoMesLabel">mês selecionado</span>)</span><b id="gCartaoPct">0%</b></div>
+    <div class="bar"><div id="gCartaoBar" style="width:0%"></div></div>
+    <div class="info" id="gCartaoInfo"></div>
+  </div>
+  <div class="goal">
+    <div class="top"><span><span class="goalIcon">📱</span>Parcelas do celular</span><b id="gParcelas">—</b></div>
+    <div class="info" id="gParcelasInfo"></div>
+  </div>
+  </div>
+
+</div>
+
+<div class="view" id="view-plan">
+  <div class="monthControl"><label for="controlMes">Mês de controle</label><input type="month" id="controlMes"></div>
+
+  <h2>Orçamento restante</h2>
+  <div class="goal" id="budgetChart"></div>
+
+  <h2>Configurações</h2>
+  <details>
+    <summary>⚙️ Salário, metas e dias úteis</summary>
+    <div class="cfgGrid">
+      <div><label>Salário mensal</label><input type="number" id="cfgSalario"></div>
+      <div><label>Dias úteis no mês</label><input type="number" id="cfgDias"></div>
+      <div><label>VR por dia útil</label><input type="number" id="cfgVr"></div>
+      <div><label>VT por dia útil</label><input type="number" id="cfgVt"></div>
+      <div><label>Faculdade</label><input type="number" id="cfgFaculdade"></div>
+      <div><label>Parcela celular</label><input type="number" id="cfgCelular"></div>
+      <div><label>Parcelas restantes (celular)</label><input type="number" id="cfgParcelasRestantes"></div>
+      <div><label>Cartão (teto)</label><input type="number" id="cfgCartao"></div>
+      <div><label>Lazer alvo</label><input type="number" id="cfgLazer"></div>
+      <div><label>Investimento alvo</label><input type="number" id="cfgInvestAlvo"></div>
+      <div><label>Meta reserva</label><input type="number" id="cfgMetaReserva"></div>
+      <div><label>Meta patrimônio</label><input type="number" id="cfgMetaPatrim"></div>
+      <div><label>Reserva — valor atual</label><input type="number" id="cfgReservaAtual"></div>
+      <div><label>Patrimônio — valor atual</label><input type="number" id="cfgPatrimAtual"></div>
+    </div>
+    <button class="btn-primary" style="margin-top:10px" id="btnSaveCfg">Salvar configurações</button>
+    <div class="syncNote"><strong>Sincronização automática desativada.</strong><br>Os dados ficam neste dispositivo até você configurar autenticação e um banco remoto.</div>
+  </details>
+</div>
+
+<!-- LANÇAMENTOS -->
+<div class="view" id="view-lanc">
+  <div class="cards bentoCards">
+    <div class="card saldo"><svg class="saldoChart" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="saldoArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d4af6a" stop-opacity=".32"/><stop offset="1" stop-color="#d4af6a" stop-opacity="0"/></linearGradient></defs><path class="chartArea" id="saldoChartArea" d="M0 22 L100 22 L100 44 L0 44 Z"></path><path class="chartBaseline" d="M0 22 L100 22"></path><path class="chartLine" id="saldoChartLine" d="M0 22 L100 22"></path></svg><div class="label">Saldo</div><div class="value" id="vSaldo">R$ 0,00</div></div>
+    <div class="card entradas"><div class="label">Entradas</div><div class="value" id="vEntradas">R$ 0,00</div></div>
+    <div class="card saidas"><div class="label">Saídas</div><div class="value" id="vSaidas">R$ 0,00</div></div>
+  </div>
+  <div class="pend" id="pendMsg" style="display:none;"></div>
+  <div class="launchAction"><button type="button" class="btn-primary" id="btnOpenForm">＋ Novo lançamento</button></div>
+
+  <h2>Lançamentos</h2>
+  <div class="filterControls">
+    <select id="fMes"></select>
+    <select id="fCategoria"><option value="">Todas categorias</option></select>
+    <select id="fTipo"><option value="">Todos tipos</option><option>Entrada</option><option>Saída</option></select>
+  </div>
+  <div class="quickFilters" aria-label="Filtros rápidos">
+    <button type="button" id="quickCurrentMonth">Mês atual</button>
+    <button type="button" id="quickExpenses">Só saídas</button>
+    <button type="button" id="quickClearFilters">Limpar filtros</button>
+  </div>
+
+  <dialog id="transactionModal" class="modal">
+  <div class="modalHead"><strong id="modalTitle">Novo lançamento</strong><button type="button" class="modalClose" id="btnCloseForm">✕</button></div>
+  <form id="form">
+    <div class="row">
+      <div class="field"><label>Data</label><input type="date" id="data"></div>
+      <div class="field"><label>Tipo</label>
+        <select id="tipo"><option value="Entrada">Entrada</option><option value="Saída">Saída</option></select>
+      </div>
+    </div>
+    <div class="row single">
+      <div class="field"><label>Categoria</label>
+        <select id="categoria">
+          <option>Salário</option><option>VR</option><option>VT</option><option>Moradia</option>
+          <option>Faculdade</option><option>Celular</option><option>Cartão</option><option>Lazer</option>
+          <option>Investimentos</option><option>Reserva</option><option>Transporte</option>
+          <option>Alimentação</option><option>Outros</option>
+        </select>
+      </div>
+    </div>
+    <div class="row single"><div class="field"><label>Descrição</label><input type="text" id="desc" required placeholder="Ex: Mercado"></div></div>
+    <div class="row">
+      <div class="field"><label>Valor (R$)</label><input type="number" id="valor" step="0.01" min="0" required placeholder="0,00"></div>
+      <div class="field"><label>Forma de pagamento</label>
+        <select id="forma"><option>Débito</option><option>Crédito</option><option>Pix</option><option>Dinheiro</option><option>Benefício</option><option>Outro</option></select>
+      </div>
+    </div>
+    <div class="row single"><div class="field"><label>Pago?</label><select id="pago"><option>Sim</option><option>Não</option></select></div></div>
+    <button type="submit" class="btn-primary" id="btnSubmit">Adicionar lançamento</button>
+    <button type="button" class="btn-cancel" id="btnCancelEdit" style="display:none;">Cancelar edição</button>
+  </form>
+  </dialog>
+
+  <ul id="list"></ul>
+  <div class="empty" id="emptyMsg" style="display:none;">Nenhum lançamento neste filtro.</div>
+
+  <h2>Gastos por categoria (filtro atual)</h2>
+  <div class="catLegend" id="catLegend" aria-label="Cores das categorias"></div>
+  <div class="goal" id="catChart"></div>
+</div>
+
+<dialog id="deleteModal" class="modal deleteModal">
+  <span class="hudCorner topLeft" aria-hidden="true"></span><span class="hudCorner topRight" aria-hidden="true"></span><span class="hudCorner bottomLeft" aria-hidden="true"></span><span class="hudCorner bottomRight" aria-hidden="true"></span>
+  <strong>Excluir lançamento?</strong>
+  <div class="deleteActions"><button type="button" class="btn-danger" id="btnConfirmDelete">Excluir</button><button type="button" class="btn-secondary" id="btnCancelDelete">Cancelar</button></div>
+</dialog>
+<dialog id="reservaModal" class="modal quickModal">
+  <span class="hudCorner topLeft" aria-hidden="true"></span><span class="hudCorner topRight" aria-hidden="true"></span><span class="hudCorner bottomLeft" aria-hidden="true"></span><span class="hudCorner bottomRight" aria-hidden="true"></span>
+  <div class="modalHead"><strong>Dinheiro guardado</strong><button type="button" class="modalClose" onclick="reservaModal.close()">✕</button></div>
+  <div style="padding:18px 14px 14px;">
+    <div class="reserveValue" id="reservaModalValue">R$ 0,00</div>
+    <div class="reserveMeta" id="reservaModalMeta"></div>
+    <div class="bar reserveBar"><div id="reservaModalBar" style="width:0%"></div></div>
+    <div class="reserveExtra" id="reservaModalExtra"></div>
+    <button type="button" class="btn-primary modalAction" id="btnUpdateReserva">Atualizar valor</button>
+  </div>
+</dialog>
+<dialog id="quickModal" class="modal quickModal">
+  <span class="hudCorner topLeft" aria-hidden="true"></span><span class="hudCorner topRight" aria-hidden="true"></span><span class="hudCorner bottomLeft" aria-hidden="true"></span><span class="hudCorner bottomRight" aria-hidden="true"></span>
+  <div class="modalHead"><strong>Resumo rápido</strong><button type="button" class="modalClose" onclick="quickModal.close()">✕</button></div>
+  <div class="quickTitle">Visão financeira atual</div>
+  <div class="quickGrid">
+    <div class="quickItem"><span>Saldo do mês</span><strong id="quickSaldo">R$ 0,00</strong></div>
+    <div class="quickItem"><span>Reserva atual</span><strong id="quickReserva">R$ 0,00</strong></div>
+    <div class="quickItem"><span>Meta da reserva</span><strong id="quickReservaPct">0%</strong></div>
+  </div>
+</dialog>
+<dialog id="monthModal" class="modal onboarding">
+  <div class="modalHead"><strong>Primeiro mês de uso</strong><button type="button" class="modalClose" id="btnCloseMonth">✕</button></div>
+  <form id="monthForm">
+    <p>Escolha o mês a partir do qual seus lançamentos e seu planejamento serão acompanhados.</p>
+    <div class="field"><label for="firstUseMonth">Mês inicial</label><input type="month" id="firstUseMonth" required></div>
+    <button type="submit" class="btn-primary">Salvar mês inicial</button>
+  </form>
+</dialog>
+<dialog id="importModal" class="modal quickModal">
+  <div class="modalHead"><strong>Prévia da importação</strong><button type="button" class="modalClose" id="btnCloseImport">✕</button></div>
+  <div style="padding:14px;"><div id="importSummary" class="sub"></div><div class="previewScroll" id="importPreview"></div><div class="dialogActions"><button type="button" class="btn-cancel" id="btnCancelImport">Cancelar</button><button type="button" class="btn-primary" id="btnConfirmImport">Salvar lançamentos</button></div></div>
+</dialog>
+<dialog id="clearModal" class="modal deleteModal">
+  <strong>Limpar todos os lançamentos?</strong><div class="sub">A reserva e as configurações serão preservadas. Essa ação não pode ser desfeita sem um backup.</div>
+  <div class="dialogActions"><button type="button" class="btn-danger" id="btnConfirmClear">Limpar</button><button type="button" class="btn-secondary" id="btnCancelClear">Cancelar</button></div>
+</dialog>
+<dialog id="restoreModal" class="modal deleteModal">
+  <strong>Restaurar backup?</strong><div class="sub" id="restoreSummary"></div>
+  <div class="dialogActions"><button type="button" class="btn-primary" id="btnConfirmRestore">Restaurar</button><button type="button" class="btn-secondary" id="btnCancelRestore">Cancelar</button></div>
+</dialog>
+<div id="categoryTip" class="categoryTip" hidden></div>
+<div id="toast" class="toast" role="status"></div>
+<details class="dataMenu">
+  <summary aria-label="Abrir menu de ferramentas de dados" title="Ferramentas de dados"></summary>
+  <div class="dataTools">
+    <button class="btn-secondary" id="btnImport">📥 Importar planilha</button>
+    <button class="btn-secondary" id="btnExport">📤 Exportar planilha</button>
+    <button class="btn-secondary" id="btnBackupJson">💾 Backup JSON</button>
+    <button class="btn-secondary" id="btnRestoreJson">↩ Restaurar JSON</button>
+    <button class="btn-secondary" id="btnSample">🧪 Carregar dados de exemplo</button>
+    <button class="btn-secondary" id="btnClearData">🗑 Limpar lançamentos</button>
+    <div class="hint">Importação, exportação e backups</div>
+  </div>
+</details>
+<input type="file" id="fileInput" accept=".xlsx,.xls">
+<input type="file" id="jsonInput" accept="application/json,.json">
+<button type="button" class="quickFab" id="quickFab" aria-label="Abrir resumo rápido"><span class="eyeGlyph" aria-hidden="true"></span></button>
+
+<noscript>Este aplicativo precisa de JavaScript para funcionar.</noscript>
+<script src="js/app.js"></script>
+<script>
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>navigator.serviceWorker.register('./sw.js').catch(error=>console.warn('Service worker indisponível',error)));
+}
+</script>
+</body>
+</html>
