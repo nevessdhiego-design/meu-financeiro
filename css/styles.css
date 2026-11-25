@@ -312,7 +312,7 @@ body.privacy .money,body.privacy .evoSvg,body.privacy .spark,body.privacy .stack
   .toast{bottom:28px;}
 }
 @media (min-width:1100px){
-  .hero{grid-column:span 7;} .planned{grid-column:span 5;}
+  .hero{grid-column:span 6;} .monthRes{grid-column:span 5;}
   .goals{grid-column:span 7;} .followup{grid-column:span 5;}
   .cats{grid-column:span 6;} .evo{grid-column:span 6;}
   .hero{padding:26px 28px 22px;}
@@ -363,3 +363,18 @@ body.privacy .money,body.privacy .evoSvg,body.privacy .spark,body.privacy .stack
 .steps .btn{display:block;margin-top:8px;padding:9px 14px;font-size:.86rem;}
 #syncSheet .steps .btn{width:auto;}
 .steps .btn{background:var(--surface);border:1px solid var(--line);border-radius:12px;font-weight:700;color:var(--text);}
+
+/* ---- Conta, cartão e resultado do mês, separados ---- */
+.heroSub{margin-left:6px;font-size:.74rem;font-weight:600;opacity:.7;}
+.hero.cartao{background:linear-gradient(150deg,var(--hero2),#55555d);}
+.kBar{position:relative;z-index:2;height:6px;margin:10px 0 2px;border-radius:99px;background:rgba(255,255,255,.18);overflow:hidden;}
+.kBar>div{height:100%;width:0;background:#fff;border-radius:99px;}
+.kBar>div.warn{background:#f59e0b;} .kBar>div.over{background:#ef4444;}
+.kBar[hidden]{display:none;}
+.monthRes .heroValue{margin:2px 0 6px;font-size:1.7rem;color:var(--text);}
+.monthPill{display:inline-block;margin-bottom:10px;padding:3px 10px;border-radius:999px;background:var(--surface2);font-size:.76rem;font-weight:600;color:var(--muted);}
+.monthPill:empty{display:none;}
+.hint{margin-top:10px;font-size:.78rem;line-height:1.4;color:var(--muted);}
+.viewNote{margin:-4px 0 10px;}
+.viewNote[hidden]{display:none;}
+#view-lanc>.seg{margin-bottom:10px;}

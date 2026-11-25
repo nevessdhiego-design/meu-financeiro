@@ -593,18 +593,81 @@
 
   // ---- Visão do mês: conta x cartão, sem contar a mesma coisa duas vezes ----
   function monthSummary(transactions, month) {
-    const r = { entradas: 0, saidas: 0, resultado: 0, noCartao: 0, emConta: 0, count: 0, outros: 0 };
+    const r = { entradas: 0, saidas: 0, resultado: 0, noCartao: 0, emConta: 0, count: 0, outros: 0, faturasPagas: 0 };
     for (const t of transactions) {
       if (!String(t.data || '').startsWith(month)) continue;
       const v = Number(t.valor) || 0, entrada = t.tipo === 'Entrada', credito = t.forma === 'Crédito';
       r.count++;
       if (!credito) r.emConta += entrada ? v : -v; // dinheiro que de fato entrou ou saiu da conta
+      if (t.categoria === 'Fatura paga' && !entrada && t.pago !== 'Não') r.faturasPagas += v;
       if (isNeutral(t)) continue;
       if (entrada) r.entradas += v;
       else { r.saidas += v; if (credito) r.noCartao += v; if ((t.categoria || 'Outros') === 'Outros') r.outros += v; }
     }
     r.resultado = r.entradas - r.saidas;
     return r;
+  }
+
+  // ---- Conta e cartão: cada um com o seu saldo, sem somar um no outro ----
+  const daysInMonth = (y, m) => new Date(y, m, 0).getDate();
+  const isoDay = (y, m, d) => `${y}-${pad2(m)}-${pad2(Math.min(d, daysInMonth(y, m)))}`;
+  function addMonthsISO(date, delta, day) {
+    const [y, m] = date.split('-').map(Number);
+    const t = new Date(y, m - 1 + delta, 1);
+    return isoDay(t.getFullYear(), t.getMonth() + 1, day);
+  }
+  function addDaysISO(date, n) {
+    const [y, m, d] = date.split('-').map(Number);
+    const t = new Date(y, m - 1, d + n);
+    return `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`;
+  }
+
+  // Saldo da conta = saldo informado (no fim do dia saldoData) + o que entrou e saiu da conta depois disso, até hoje.
+  // Compra no crédito não mexe na conta; pagamento de fatura e transferência própria mexem. "Não pago" e datas futuras ficam de fora.
+  function accountBalance(transactions, config, refISO) {
+    const base = Number(config.saldoInicial) || 0, from = config.saldoData || '';
+    let saldo = base;
+    for (const t of transactions) {
+      if (t.forma === 'Crédito' || t.pago === 'Não' || !t.data || t.data > refISO || (from && t.data <= from)) continue;
+      const v = Number(t.valor) || 0;
+      saldo += t.tipo === 'Entrada' ? v : -v;
+    }
+    return { saldo, configurado: Boolean(from || base !== 0) };
+  }
+
+  // Fatura aberta no dia refISO: do dia seguinte ao fechamento anterior até o fechamento, e o vencimento dela.
+  function invoiceCycle(refISO, fecha, vence) {
+    const [y, m, d] = refISO.split('-').map(Number);
+    const end = d <= Math.min(fecha, daysInMonth(y, m)) ? isoDay(y, m, fecha) : addMonthsISO(refISO, 1, fecha);
+    const start = addDaysISO(addMonthsISO(end, -1, fecha), 1);
+    const [ey, em] = end.split('-').map(Number);
+    const due = vence > 0 ? (vence > fecha ? isoDay(ey, em, vence) : addMonthsISO(end, 1, vence)) : '';
+    return { start, end, due };
+  }
+
+  function cardSummary(transactions, config, refISO) {
+    const fecha = Math.round(Number(config.cartaoFecha)) || 0, vence = Math.round(Number(config.cartaoVence)) || 0;
+    const limite = Number(config.cartaoLimite) || 0;
+    const compras = transactions.filter((t) => t.forma === 'Crédito' && !isNeutral(t) && t.data);
+    const total = (a, b) => compras.filter((t) => t.data >= a && t.data <= b).reduce((s, t) => s + (t.tipo === 'Entrada' ? -1 : 1) * (Number(t.valor) || 0), 0);
+    let aberta, fechada = null;
+    if (fecha >= 1 && fecha <= 31) {
+      const cyc = invoiceCycle(refISO, fecha, vence);
+      aberta = { ...cyc, total: total(cyc.start, cyc.end) };
+      const prev = invoiceCycle(addDaysISO(cyc.start, -1), fecha, vence);
+      const prevTotal = total(prev.start, prev.end);
+      if (prevTotal > 0) {
+        const pago = transactions.filter((t) => t.categoria === 'Fatura paga' && t.tipo === 'Saída' && t.pago !== 'Não' && t.data > prev.end && t.data <= refISO)
+          .reduce((s, t) => s + (Number(t.valor) || 0), 0);
+        fechada = { ...prev, total: prevTotal, pago, faltam: Math.max(prevTotal - pago, 0) };
+      }
+    } else {
+      const [y, m] = refISO.split('-').map(Number);
+      const start = isoDay(y, m, 1), end = isoDay(y, m, 31);
+      aberta = { start, end, due: '', total: total(start, end) };
+    }
+    const usado = limite > 0 ? aberta.total + (fechada ? fechada.faltam : 0) : 0;
+    return { configurado: fecha >= 1 && fecha <= 31, aberta, fechada, limite, usado, livre: limite > 0 ? limite - usado : 0 };
   }
 
   // Parcelas já lançadas que ainda vão cair nos próximos meses (a partir da última parcela vista de cada compra).
@@ -705,6 +768,6 @@
     decodeBytes, parseBankDate, parseMoney, parseCSV, parseBankCSV, parseOFX,
     pdfItemsToLines, parsePdfStatement, guessCategory, guessForma, bankTransactions, markDuplicates,
     NEUTRAL_CATEGORIES, isNeutral, parseInstallment, merchantKey, ruleKey, markInternalTransfers, importSanity,
-    monthSummary, installmentSchedule, dataWarnings, recategorize, applyCategoryToSimilar,
+    monthSummary, accountBalance, invoiceCycle, cardSummary, installmentSchedule, dataWarnings, recategorize, applyCategoryToSimilar,
   };
 });

@@ -3,7 +3,7 @@
 const { fmt, pct, escapeHtml, pad2, todayISO, curMonth, shiftMonth, monthLabel, monthShort, normalizeImportText,
         parseImportNumber, parseImportDate, monthlyTotals, matchesSearch, backupStatus,
         dayLabel, groupByDay, categoryTotals, monthSummary, installmentSchedule, dataWarnings, recategorize,
-        applyCategoryToSimilar, isNeutral, parseInstallment, ruleKey, guessCategory, importSanity } = FinLib;
+        applyCategoryToSimilar, isNeutral, parseInstallment, ruleKey, guessCategory, importSanity, accountBalance, cardSummary } = FinLib;
 
 let transactions = [];
 let editingId = null;
@@ -13,6 +13,7 @@ let pendingRestore = null;
 let firstUseMonthValue = null; // mantido só para compatibilidade com backups antigos
 let selectedMonth = curMonth();
 let tipoFilter = '';
+let viewFilter = ''; // '', 'conta' ou 'cartao'
 let tombstones = {}; // lançamentos apagados (para a sincronização saber que foram apagados)
 let configUpdatedAt = 0;
 let categoryRules = {}; // categorias que o Dhiego ensinou: { 'Saída:padaria joao': 'Alimentação' }
@@ -20,7 +21,8 @@ let categoryRules = {}; // categorias que o Dhiego ensinou: { 'Saída:padaria jo
 // Valores iniciais fictícios: o app não traz dados reais de ninguém.
 const DEFAULT_CONFIG = {
   salario:3200, dias:22, vr:28, vt:12, faculdade:650, celular:180, parcelasRestantes:8, cartao:800,
-  lazer:400, investAlvo:300, metaReserva:10000, metaPatrim:100000, reservaAtual:2500, patrimAtual:0, metas:{}
+  lazer:400, investAlvo:300, metaReserva:10000, metaPatrim:100000, reservaAtual:2500, patrimAtual:0, metas:{},
+  saldoInicial:0, saldoData:'', cartaoLimite:0, cartaoFecha:0, cartaoVence:0
 };
 let config = {...DEFAULT_CONFIG};
 const STORAGE_KEY = 'meu-financeiro-v1';
@@ -238,13 +240,17 @@ function fillCfgForm(){
   cfgCartao.value=config.cartao; cfgLazer.value=config.lazer; cfgInvestAlvo.value=config.investAlvo;
   cfgMetaReserva.value=config.metaReserva; cfgMetaPatrim.value=config.metaPatrim;
   cfgReservaAtual.value=config.reservaAtual; cfgPatrimAtual.value=config.patrimAtual;
+  cfgSaldoInicial.value=config.saldoInicial||''; cfgSaldoData.value=config.saldoData||''; cfgLimite.value=config.cartaoLimite||'';
+  cfgFecha.value=config.cartaoFecha||''; cfgVence.value=config.cartaoVence||'';
 }
 btnSaveCfg.addEventListener('click', ()=>{
   const n = el => parseFloat(el.value)||0;
   config = {
     ...config, salario:n(cfgSalario), dias:n(cfgDias), vr:n(cfgVr), vt:n(cfgVt), faculdade:n(cfgFaculdade), celular:n(cfgCelular),
     parcelasRestantes:n(cfgParcelasRestantes), cartao:n(cfgCartao), lazer:n(cfgLazer), investAlvo:n(cfgInvestAlvo),
-    metaReserva:n(cfgMetaReserva), metaPatrim:n(cfgMetaPatrim), reservaAtual:n(cfgReservaAtual), patrimAtual:n(cfgPatrimAtual)
+    metaReserva:n(cfgMetaReserva), metaPatrim:n(cfgMetaPatrim), reservaAtual:n(cfgReservaAtual), patrimAtual:n(cfgPatrimAtual),
+    saldoInicial:n(cfgSaldoInicial), saldoData:cfgSaldoData.value||'', cartaoLimite:n(cfgLimite),
+    cartaoFecha:Math.min(Math.max(Math.round(n(cfgFecha)),0),31), cartaoVence:Math.min(Math.max(Math.round(n(cfgVence)),0),31)
   };
   saveLocalState(); render();
   showToast('Alterações salvas ✓');
@@ -258,44 +264,42 @@ function setRing(ringEl, textEl, ratio){
   textEl.textContent = pct(p);
 }
 
-function renderSaldoChart(list){
-  const line = $('saldoChartLine'), area = $('saldoChartArea');
-  const ordered = list.filter(t=>!isNeutral(t)).sort((a,b)=> (a.data||'').localeCompare(b.data||''));
-  if(!ordered.length){
-    line.setAttribute('d','M0 22 L100 22');
-    area.setAttribute('d','M0 22 L100 22 L100 44 L0 44 Z');
-    return;
-  }
-  let balance = 0;
-  const points = [{x:0,value:0}];
-  ordered.forEach((t,index)=>{
-    const amount = Number(t.valor)||0;
-    balance += t.tipo==='Entrada' ? amount : -amount;
-    points.push({x:(index+1)/(ordered.length)*100,value:balance});
-  });
-  const values = points.map(p=>p.value);
-  const min = Math.min(...values), max = Math.max(...values);
-  const spread = max-min || Math.max(Math.abs(max),1);
-  const lower = min-spread*.12, upper = max+spread*.12;
-  const toY = v => 38-((v-lower)/(upper-lower))*32;
-  const path = points.map((p,i)=>`${i===0?'M':'L'}${p.x.toFixed(2)} ${toY(p.value).toFixed(2)}`).join(' ');
-  line.setAttribute('d',path);
-  area.setAttribute('d',`${path} L100 44 L0 44 Z`);
-}
-
 function renderGeral(){
   const monthList = transactions.filter(t=>(t.data||'').startsWith(selectedMonth));
   const S = monthSummary(transactions, selectedMonth);
-  const entradas = S.entradas, saidas = S.saidas;
+  const hoje = todayISO();
+  const dd = iso => iso ? iso.slice(8,10)+'/'+iso.slice(5,7) : '';
+
+  // 1) Conta: só o dinheiro que está na conta
+  const acc = accountBalance(transactions, config, hoje);
+  cSaldo.textContent = acc.configurado ? fmt(acc.saldo) : '—';
+  cPill.textContent = acc.configurado ? '' : 'Informe o saldo atual em Planejar → Conta e cartão';
+  cEntradas.textContent = fmt(S.entradas);
+  cSaidas.textContent = fmt(S.saidas - S.noCartao);
+  cNote.textContent = S.faturasPagas ? `Pagou de fatura neste mês: ${fmt(S.faturasPagas)} (já contado nas compras do cartão)` : '';
+
+  // 2) Cartão: fatura aberta, última fatura e limite
+  const card = cardSummary(transactions, config, hoje);
+  kAberta.textContent = fmt(card.aberta.total);
+  kSub.textContent = card.configurado ? 'fatura aberta' : 'compras do mês';
+  kPill.textContent = card.configurado ? `Fecha ${dd(card.aberta.end)}${card.aberta.due ? ' · vence '+dd(card.aberta.due) : ''}` : 'Informe fechamento e vencimento em Planejar';
+  kBarWrap.hidden = !(card.limite>0);
+  if(card.limite>0){ const r = card.usado/card.limite; kBar.style.width = Math.min(Math.max(r,0),1)*100+'%'; kBar.className = r>=1 ? 'over' : r>=.8 ? 'warn' : ''; }
+  if(card.fechada){
+    kFechadaLabel.textContent = `Última fatura${card.fechada.due ? ' (vence '+dd(card.fechada.due)+')' : ''}`;
+    kFechada.textContent = card.fechada.faltam>0 ? `${fmt(card.fechada.faltam)} a pagar` : `${fmt(card.fechada.total)} paga`;
+  }else{ kFechadaLabel.textContent = 'Última fatura'; kFechada.textContent = '—'; }
+  kLivre.textContent = card.limite>0 ? fmt(card.livre) : '—';
+  kNote.textContent = card.limite>0 ? `${fmt(card.usado)} do limite de ${fmt(card.limite)} em uso (fatura aberta + última não paga)` : '';
+
+  // 3) Resultado do mês: tudo que foi gasto, na conta ou no cartão
   heroMonth.textContent = monthLabel(selectedMonth);
   hSaldo.textContent = fmt(S.resultado);
-  heroNote.innerHTML = S.count
-    ? `No cartão: <b class="money">${fmt(S.noCartao)}</b> (só sai da conta quando a fatura é paga) · Movimento da conta: <b class="money">${fmt(S.emConta)}</b>` : '';
-  hEntradas.textContent = fmt(entradas); hSaidas.textContent = fmt(saidas);
-  heroPill.textContent = entradas>0
-    ? (saidas>entradas ? 'Saídas acima das entradas' : `${pct(saidas/entradas)} das entradas gastas`)
-    : (saidas>0 ? 'Sem entradas neste mês' : '');
-  renderSaldoChart(monthList);
+  hEntradas.textContent = fmt(S.entradas); hSaidas.textContent = fmt(S.saidas);
+  hSaidasConta.textContent = fmt(S.saidas - S.noCartao); hSaidasCartao.textContent = fmt(S.noCartao);
+  heroPill.textContent = S.entradas>0
+    ? (S.saidas>S.entradas ? 'Saídas acima das entradas' : `${pct(S.saidas/S.entradas)} das entradas gastas`)
+    : (S.saidas>0 ? 'Sem entradas neste mês' : '');
 
   const recursos = config.salario + config.vr*config.dias + config.vt*config.dias;
   const despesas = config.faculdade + config.celular + config.cartao + config.lazer + config.investAlvo;
@@ -309,14 +313,6 @@ function renderGeral(){
   const pRaw = config.metaPatrim>0 ? config.patrimAtual/config.metaPatrim : 0;
   setRing(gPatrimRing, gPatrimPct, pRaw);
   gPatrimInfo.textContent = `${fmt(config.patrimAtual)} de ${fmt(config.metaPatrim)}`;
-
-  const cartaoGasto = sum(monthList, t=>(t.tipo==='Saída' && t.forma==='Crédito' && !isNeutral(t)) ? (Number(t.valor)||0) : 0);
-  const cPct = config.cartao>0 ? Math.min(cartaoGasto/config.cartao,1) : 0;
-  gCartaoPct.textContent = pct(cPct);
-  gCartaoBar.style.width = (cPct*100)+'%';
-  gCartaoBar.className = cPct>=1 ? 'negfill' : (cPct>=0.9 ? 'warnfill' : '');
-  gCartaoInfo.textContent = `${fmt(cartaoGasto)} de ${fmt(config.cartao)}` + (cPct>=0.9 && cPct<1 ? ' · perto do teto' : cPct>=1 ? ' · teto atingido' : '');
-  cartaoMesLabel.textContent = monthLabel(selectedMonth).split(' de ')[0];
 
   gParcelas.textContent = config.parcelasRestantes>0 ? `${config.parcelasRestantes} restante${config.parcelasRestantes===1?'':'s'}` : 'Quitado';
   gParcelasInfo.textContent = config.parcelasRestantes>0
@@ -411,9 +407,15 @@ function filteredList(){
     (!fMes.value || (t.data||'').startsWith(fMes.value)) &&
     (!fCategoria.value || t.categoria===fCategoria.value) &&
     (!tipoFilter || t.tipo===tipoFilter) &&
+    (!viewFilter || (viewFilter==='cartao' ? t.forma==='Crédito' : t.forma!=='Crédito')) &&
     matchesSearch(t, fBusca.value)
   );
 }
+viewChips.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{
+  viewFilter = b.dataset.v;
+  viewChips.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+  render();
+}));
 function setTipoFilter(value){
   tipoFilter = value;
   tipoChips.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.tipo===value));
@@ -430,10 +432,17 @@ function renderLancamentos(){
   let entradas = 0, saidas = 0, naoPago = 0;
   for(const t of filtered){
     const v = Number(t.valor)||0;
-    if(!isNeutral(t)){ if(t.tipo==='Entrada') entradas += v; else saidas += v; }
+    // Na visão Conta, pagamento de fatura e transferência próprias contam (mexem na conta); nas outras, ficam de fora.
+    if(viewFilter==='conta' || !isNeutral(t)){ if(t.tipo==='Entrada') entradas += v; else saidas += v; }
     if(t.pago==='Não') naoPago++;
   }
-  vSaldo.textContent = fmt(entradas-saidas); vEntradas.textContent = fmt(entradas); vSaidas.textContent = fmt(saidas);
+  const rotulos = viewFilter==='cartao' ? ['Fatura (compras − estornos)','Estornos','Compras'] : viewFilter==='conta' ? ['Movimento da conta','Entrou','Saiu'] : ['Resultado','Entradas','Saídas'];
+  lbSaldo.textContent = rotulos[0]; lbEntradas.textContent = rotulos[1]; lbSaidas.textContent = rotulos[2];
+  vSaldo.textContent = fmt(viewFilter==='cartao' ? saidas-entradas : entradas-saidas);
+  vEntradas.textContent = fmt(entradas); vSaidas.textContent = fmt(saidas);
+  viewNote.hidden = !viewFilter;
+  viewNote.textContent = viewFilter==='cartao' ? 'Só compras no crédito. O pagamento da fatura aparece na visão Conta.'
+    : viewFilter==='conta' ? 'Só o que entrou e saiu da conta (débito, Pix, dinheiro…). Compras no crédito aparecem na visão Cartão.' : '';
   pendMsg.hidden = naoPago===0;
   if(naoPago>0) pendMsg.innerHTML = `<b>${naoPago}</b> lançamento${naoPago===1?'':'s'} marcado${naoPago===1?'':'s'} como "Não pago"`;
 
@@ -899,7 +908,7 @@ btnIosHintClose.addEventListener('click', ()=>{
 // ---- Render geral ----
 
 // ---- Sincronização entre aparelhos (criptografada; veja docs/sincronizacao.md) ----
-const APP_VERSION = 'v17'; // igual ao cache do sw.js
+const APP_VERSION = 'v18'; // igual ao cache do sw.js
 const SYNC_KEY = 'meu-financeiro-sync';
 let syncCfg = null, syncTimer = null, syncBusy = false, syncMsg = {text:'', err:false};
 function loadSyncCfg(){ try{ syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)||'null'); }catch(e){ syncCfg = null; } }

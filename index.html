@@ -84,20 +84,27 @@
       </div>
 
       <div class="homeGrid">
-        <article class="hero" aria-label="Saldo do mês">
-          <div class="heroLabel">Resultado de <span id="heroMonth">—</span></div>
-          <div class="heroValue money" id="hSaldo">R$ 0,00</div>
-          <div class="heroPill" id="heroPill"></div>
-          <svg class="spark" viewBox="0 0 100 44" preserveAspectRatio="none" aria-hidden="true">
-            <defs><linearGradient id="saldoArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient></defs>
-            <path class="sparkArea" id="saldoChartArea" d="M0 22 L100 22 L100 44 L0 44 Z"></path>
-            <path class="sparkLine" id="saldoChartLine" d="M0 22 L100 22"></path>
-          </svg>
+        <article class="hero conta" aria-label="Conta">
+          <div class="heroLabel">Conta <span class="heroSub">saldo de hoje</span></div>
+          <div class="heroValue money" id="cSaldo">R$ 0,00</div>
+          <div class="heroPill" id="cPill"></div>
           <div class="heroSplit">
-            <div><span class="dot in"></span><small>Entradas</small><strong class="money" id="hEntradas">R$ 0,00</strong></div>
-            <div><span class="dot out"></span><small>Saídas</small><strong class="money" id="hSaidas">R$ 0,00</strong></div>
+            <div><span class="dot in"></span><small>Entradas no mês</small><strong class="money" id="cEntradas">R$ 0,00</strong></div>
+            <div><span class="dot out"></span><small>Saídas da conta</small><strong class="money" id="cSaidas">R$ 0,00</strong></div>
           </div>
-          <div class="heroNote" id="heroNote"></div>
+          <div class="heroNote" id="cNote"></div>
+        </article>
+
+        <article class="hero cartao" aria-label="Cartão de crédito">
+          <div class="heroLabel">Cartão <span class="heroSub" id="kSub">fatura aberta</span></div>
+          <div class="heroValue money" id="kAberta">R$ 0,00</div>
+          <div class="heroPill" id="kPill"></div>
+          <div class="kBar" id="kBarWrap" hidden><div id="kBar"></div></div>
+          <div class="heroSplit">
+            <div><small id="kFechadaLabel">Última fatura</small><strong class="money" id="kFechada">—</strong></div>
+            <div><small>Limite livre</small><strong class="money" id="kLivre">—</strong></div>
+          </div>
+          <div class="heroNote" id="kNote"></div>
         </article>
 
         <article class="panel insights" id="insightsPanel" hidden>
@@ -105,17 +112,21 @@
           <div id="insightList"></div>
         </article>
 
-        <article class="panel planned">
-          <h3>Planejado do mês</h3>
+        <article class="panel monthRes">
+          <h3>Resultado de <span id="heroMonth">—</span></h3>
+          <div class="heroValue money" id="hSaldo">R$ 0,00</div>
+          <div class="monthPill" id="heroPill"></div>
           <dl class="kv">
-            <div><dt>Recursos</dt><dd class="money" id="vRecursos">—</dd></div>
-            <div><dt>Despesas fixas</dt><dd class="money" id="vDespesas">—</dd></div>
-            <div class="total"><dt>Saldo planejado</dt><dd class="money" id="vSaldoPlan">—</dd></div>
+            <div><dt>Entradas</dt><dd class="money pos" id="hEntradas">—</dd></div>
+            <div><dt>Saídas (conta + cartão)</dt><dd class="money neg" id="hSaidas">—</dd></div>
+            <div><dt>&nbsp;&nbsp;na conta</dt><dd class="money" id="hSaidasConta">—</dd></div>
+            <div><dt>&nbsp;&nbsp;no cartão</dt><dd class="money" id="hSaidasCartao">—</dd></div>
           </dl>
+          <p class="hint">Aqui cada compra conta na data em que foi feita. Pagar a fatura não entra, para não contar em dobro.</p>
         </article>
 
         <article class="panel goals">
-          <h3>Metas</h3>
+          <h3>Reservas</h3>
           <div class="ringGrid">
             <button type="button" class="ringTile" id="reservaCard" aria-label="Ver detalhes da reserva de emergência">
               <span class="ring"><svg viewBox="0 0 36 36" aria-hidden="true"><circle class="ringBg" cx="18" cy="18" r="15.9155"/><circle class="ringFg" id="gReservaRing" cx="18" cy="18" r="15.9155" stroke-dasharray="0 100"/></svg><b id="gReservaPct">0%</b></span>
@@ -131,12 +142,7 @@
         </article>
 
         <article class="panel followup">
-          <h3>Cartão e parcelas</h3>
-          <div class="meter">
-            <div class="meterHead"><span>Cartão em <span id="cartaoMesLabel">—</span></span><b id="gCartaoPct">0%</b></div>
-            <div class="bar"><div id="gCartaoBar" style="width:0%"></div></div>
-            <div class="meterInfo money" id="gCartaoInfo"></div>
-          </div>
+          <h3>Parcelas</h3>
           <div class="meter">
             <div class="meterHead"><span>Parcelas do celular</span><b id="gParcelas">—</b></div>
             <div class="meterInfo money" id="gParcelasInfo"></div>
@@ -168,11 +174,18 @@
     <!-- LANÇAMENTOS -->
     <section class="view" id="view-lanc" aria-label="Lançamentos">
       <div class="sumStrip">
-        <div><small>Saldo</small><strong class="money" id="vSaldo">R$ 0,00</strong></div>
-        <div><small>Entradas</small><strong class="money pos" id="vEntradas">R$ 0,00</strong></div>
-        <div><small>Saídas</small><strong class="money neg" id="vSaidas">R$ 0,00</strong></div>
+        <div><small id="lbSaldo">Resultado</small><strong class="money" id="vSaldo">R$ 0,00</strong></div>
+        <div><small id="lbEntradas">Entradas</small><strong class="money pos" id="vEntradas">R$ 0,00</strong></div>
+        <div><small id="lbSaidas">Saídas</small><strong class="money neg" id="vSaidas">R$ 0,00</strong></div>
       </div>
       <div class="pend" id="pendMsg" hidden></div>
+
+      <div class="seg wide" id="viewChips" role="group" aria-label="Conta ou cartão">
+        <button type="button" class="on" data-v="">Tudo</button>
+        <button type="button" data-v="conta">Conta</button>
+        <button type="button" data-v="cartao">Cartão</button>
+      </div>
+      <p class="note viewNote" id="viewNote" hidden></p>
 
       <div class="searchRow"><svg class="ic"><use href="#i-search"/></svg><input type="search" id="fBusca" placeholder="Buscar lançamento" aria-label="Buscar lançamento" autocomplete="off"></div>
       <div class="seg wide" id="tipoChips" role="group" aria-label="Filtrar por tipo">
@@ -192,10 +205,30 @@
 
     <!-- PLANEJAR -->
     <section class="view" id="view-plan" aria-label="Planejar">
+      <article class="panel planned">
+        <h3>Planejado do mês</h3>
+        <dl class="kv">
+          <div><dt>Recursos</dt><dd class="money" id="vRecursos">—</dd></div>
+          <div><dt>Despesas fixas</dt><dd class="money" id="vDespesas">—</dd></div>
+          <div class="total"><dt>Saldo planejado</dt><dd class="money" id="vSaldoPlan">—</dd></div>
+        </dl>
+        <p class="hint">Isto é o plano, não o que aconteceu. O que aconteceu está no Início.</p>
+      </article>
+
       <article class="panel">
         <h3>Orçamento restante</h3>
         <div id="budgetChart"></div>
       </article>
+
+      <h4 class="groupTitle">Conta e cartão (para os saldos do Início)</h4>
+      <div class="group">
+        <label class="row"><span>Saldo da conta</span><i class="unit">R$</i><input type="number" id="cfgSaldoInicial" inputmode="decimal" step="any"></label>
+        <label class="row"><span>…no fim do dia</span><input type="date" id="cfgSaldoData"></label>
+        <label class="row"><span>Limite do cartão</span><i class="unit">R$</i><input type="number" id="cfgLimite" inputmode="decimal" step="any"></label>
+        <label class="row"><span>Fatura fecha no dia</span><input type="number" id="cfgFecha" inputmode="numeric" min="1" max="31"></label>
+        <label class="row"><span>Fatura vence no dia</span><input type="number" id="cfgVence" inputmode="numeric" min="1" max="31"></label>
+      </div>
+      <p class="note">Informe o saldo que está na conta e a data de hoje: o app soma só o que acontecer depois. Compras no crédito não mexem na conta; só o pagamento da fatura.</p>
 
       <h4 class="groupTitle">Metas por categoria</h4>
       <div class="group" id="metasGroup">

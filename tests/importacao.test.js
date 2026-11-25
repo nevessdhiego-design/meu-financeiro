@@ -330,3 +330,50 @@ test('PDF de conta que cita "pagamento de fatura" não é confundido com fatura 
   const r = lib.parsePdfStatement(['Extrato conta corrente', 'Saldo anterior 100,00', '03/11/2026 Pagamento de fatura cartão -500,00', 'Limite disponível 300,00']);
   assert.equal(r.cardHint, false);
 });
+
+test('accountBalance: saldo informado + movimentos depois da data; crédito, não pago e futuro ficam de fora', () => {
+  const t = [
+    { data: '2026-11-01', valor: 999, tipo: 'Saída', forma: 'Débito' }, // antes do saldo informado: já está nele
+    { data: '2026-11-10', valor: 200, tipo: 'Saída', forma: 'Pix' },
+    { data: '2026-11-11', valor: 3000, tipo: 'Entrada', forma: 'Pix' },
+    { data: '2026-11-12', valor: 800, tipo: 'Saída', forma: 'Crédito' }, // cartão: não mexe na conta
+    { data: '2026-11-13', valor: 50, tipo: 'Saída', forma: 'Débito', pago: 'Não' },
+    { data: '2026-12-01', valor: 70, tipo: 'Saída', forma: 'Débito' }, // futuro
+    { data: '2026-11-14', valor: 1000, tipo: 'Saída', forma: 'Pix', categoria: 'Fatura paga' }, // pagar a fatura sai da conta
+  ];
+  const r = lib.accountBalance(t, { saldoInicial: 1500, saldoData: '2026-11-05' }, '2026-11-20');
+  assert.equal(r.saldo, 1500 - 200 + 3000 - 1000);
+  assert.equal(r.configurado, true);
+  assert.equal(lib.accountBalance([], {}, '2026-11-20').configurado, false);
+});
+
+test('invoiceCycle: fatura aberta, fechamento e vencimento, inclusive virada de mês e ano', () => {
+  assert.deepEqual(lib.invoiceCycle('2026-11-03', 5, 12), { start: '2026-10-06', end: '2026-11-05', due: '2026-11-12' });
+  assert.deepEqual(lib.invoiceCycle('2026-11-06', 5, 12), { start: '2026-11-06', end: '2026-12-05', due: '2026-12-12' });
+  assert.deepEqual(lib.invoiceCycle('2026-12-20', 25, 5), { start: '2026-11-26', end: '2026-12-25', due: '2027-01-05' }); // vence no mês seguinte
+  assert.deepEqual(lib.invoiceCycle('2026-02-10', 31, 10), { start: '2026-02-01', end: '2026-02-28', due: '2026-03-10' }); // fechamento no dia 31 em mês curto
+});
+
+test('cardSummary: fatura aberta, última fechada com o que falta pagar e limite livre', () => {
+  const t = [
+    { data: '2026-10-10', valor: 500, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras' }, // fatura fechada em 05/11
+    { data: '2026-10-20', valor: 100, tipo: 'Saída', forma: 'Crédito', categoria: 'Lazer' },
+    { data: '2026-11-08', valor: 300, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras' }, // aberta
+    { data: '2026-11-09', valor: 40, tipo: 'Entrada', forma: 'Crédito', categoria: 'Compras' }, // estorno
+    { data: '2026-11-10', valor: 400, tipo: 'Saída', forma: 'Pix', categoria: 'Fatura paga' }, // pagou parte da fechada
+  ];
+  const c = lib.cardSummary(t, { cartaoFecha: 5, cartaoVence: 12, cartaoLimite: 2000 }, '2026-11-15');
+  assert.equal(c.configurado, true);
+  assert.equal(c.aberta.total, 260);
+  assert.equal(c.aberta.end, '2026-12-05');
+  assert.deepEqual([c.fechada.total, c.fechada.pago, c.fechada.faltam, c.fechada.due], [600, 400, 200, '2026-11-12']);
+  assert.deepEqual([c.usado, c.livre], [460, 1540]);
+  const sem = lib.cardSummary(t, {}, '2026-11-15'); // sem fechamento: usa o mês do calendário
+  assert.equal(sem.configurado, false);
+  assert.equal(sem.aberta.total, 260);
+});
+
+test('monthSummary soma as faturas pagas do mês à parte', () => {
+  const s = lib.monthSummary([{ data: '2026-11-10', valor: 400, tipo: 'Saída', forma: 'Pix', categoria: 'Fatura paga' }], '2026-11');
+  assert.deepEqual([s.faturasPagas, s.saidas], [400, 0]);
+});
