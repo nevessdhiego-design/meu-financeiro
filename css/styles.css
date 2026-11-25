@@ -355,3 +355,11 @@ body.privacy .money,body.privacy .evoSvg,body.privacy .spark,body.privacy .stack
 #syncOff .seg{margin:6px 0 10px;}
 #syncSheet .btn{width:100%;margin-top:12px;}
 #syncSheet [hidden]{display:none !important;}
+
+.steps{margin:6px 0 12px;padding-left:22px;font-size:.84rem;line-height:1.45;color:var(--text);}
+.steps li{margin:0 0 10px;padding-left:4px;}
+.steps li::marker{font-weight:700;color:var(--brand);}
+.steps a{color:var(--brand);font-weight:600;text-decoration:underline;}
+.steps .btn{display:block;margin-top:8px;padding:9px 14px;font-size:.86rem;}
+#syncSheet .steps .btn{width:auto;}
+.steps .btn{background:var(--surface);border:1px solid var(--line);border-radius:12px;font-weight:700;color:var(--text);}

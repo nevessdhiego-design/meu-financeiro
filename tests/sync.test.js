@@ -135,3 +135,11 @@ test('cliente: chama as funções do servidor com a chave pública e entende con
   assert.equal(calls[0][1].Authorization, undefined);
   assert.deepEqual(calls[1][2], { p_id: 'id1', p_data: 'dados', p_expected: 0 });
 });
+
+test('o SQL copiado pelo app é idêntico ao arquivo docs/sincronizacao.sql', () => {
+  let fs = null;
+  try { fs = require('node:fs'); } catch (e) { /* navegador: sem arquivos */ }
+  if (!fs || !fs.readFileSync) return;
+  const file = fs.readFileSync(require('node:path').join(__dirname, '..', 'docs', 'sincronizacao.sql'), 'utf8').replace(/\r\n/g, '\n');
+  assert.equal(sync.SQL_SETUP, file);
+});

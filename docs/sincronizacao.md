@@ -14,18 +14,16 @@ enviar uma cópia **criptografada** para um projeto gratuito do Supabase que é 
   apagar ou corromper a cópia do servidor (não consegue ler). Não o deixe em lugar público.
 - Quando o app ficar offline, ele funciona normalmente e sincroniza quando a internet voltar.
 
-## Configuração (uma vez, ~10 minutos)
+## Configuração (uma vez, ~10 minutos, no notebook)
 
-1. Crie uma conta em <https://supabase.com> e um **New project** (região São Paulo, qualquer nome, anote a senha do banco
-   no seu gerenciador de senhas; este app não usa essa senha).
-2. No projeto, abra **SQL Editor → New query**, cole o conteúdo de [`sincronizacao.sql`](sincronizacao.sql) e clique em **Run**.
-3. Em **Project Settings → API** (ou **API Keys**) copie:
-   - **Project URL** (`https://xxxx.supabase.co`);
-   - a chave **anon** ou **publishable**. **Nunca** use a `service_role` / `secret`: ela não pode ir para o app.
-4. No primeiro aparelho: **Mais → Sincronizar entre aparelhos → Primeiro aparelho**. Cole o endereço e a chave, crie a
-   senha de criptografia (8+ caracteres) e toque em **Ativar sincronização**.
-5. No segundo aparelho: no primeiro, abra a mesma tela e toque em **Copiar ou compartilhar o código**. No segundo, escolha
-   **Já tenho um código**, cole o código e digite a **mesma senha**.
+O próprio app mostra estes passos em **Mais → Sincronizar entre aparelhos → 1º aparelho (configurar)**, com um botão que copia o SQL.
+
+1. **Conta.** Em <https://supabase.com> clique em **Start your project** e entre com Google ou GitHub.
+2. **Projeto.** **New project**, nome `meu-financeiro`, **Database Password → Generate** (guarde; o app não usa), região **South America (São Paulo)**, **Create new project**. Espere 1 a 2 minutos.
+3. **SQL.** No menu da esquerda, **SQL Editor → New query**. Cole o conteúdo de [`sincronizacao.sql`](sincronizacao.sql) (no app, o botão **Copiar o SQL**) e clique em **Run**. Deve aparecer *Success. No rows returned*.
+4. **Endereço e chave.** Engrenagem **Project Settings → API** (ou **API Keys**): copie o **Project URL** (`https://xxxx.supabase.co`) e a chave **anon** ou **publishable**. **Nunca** copie a `service_role` / `secret`.
+5. **No app (1º aparelho).** Cole o Project URL e a chave, invente a **senha de criptografia** (8+ caracteres) e toque em **Ativar sincronização**.
+6. **2º aparelho.** No primeiro, abra a mesma tela e toque em **Copiar ou compartilhar o código**; mande o código para você mesmo. No segundo, escolha **2º aparelho (conectar)**, cole o código e digite a **mesma senha**.
 
 ## Observações
 

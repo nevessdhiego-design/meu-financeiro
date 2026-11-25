@@ -310,14 +310,22 @@
 
   <div id="syncOff">
     <div class="seg wide" id="syncMode" role="group" aria-label="Como configurar">
-      <button type="button" data-m="create" class="on">Primeiro aparelho</button>
-      <button type="button" data-m="join">Já tenho um código</button>
+      <button type="button" data-m="create" class="on">1º aparelho (configurar)</button>
+      <button type="button" data-m="join">2º aparelho (conectar)</button>
     </div>
     <div id="syncCreate">
-      <p class="note">Antes: crie um projeto gratuito no Supabase e rode o SQL de <b>docs/sincronizacao.sql</b> (passo a passo em <b>docs/sincronizacao.md</b>). Depois preencha aqui.</p>
+      <p class="note"><b>Faça isto no notebook</b> (é mais fácil). Você vai criar um "cofre" gratuito na internet que só guarda texto embaralhado. Leva uns 10 minutos.</p>
+      <ol class="steps">
+        <li><b>Crie a conta.</b> Abra <a href="https://supabase.com" target="_blank" rel="noopener">supabase.com</a>, clique em <b>Start your project</b> e entre com o Google ou GitHub.</li>
+        <li><b>Crie o projeto.</b> Clique em <b>New project</b>. Nome: <i>meu-financeiro</i>. Em <i>Database Password</i> clique em <b>Generate</b> e guarde essa senha (este app não usa). Região: <i>South America (São Paulo)</i>. Clique em <b>Create new project</b> e espere 1 a 2 minutos.</li>
+        <li><b>Instale o "cofre".</b> No menu da esquerda, abra <b>SQL Editor</b> e clique em <b>New query</b>. Toque no botão abaixo para copiar o SQL, cole na caixa grande e clique em <b>Run</b>. Tem que aparecer <i>Success. No rows returned</i>.
+          <button type="button" class="btn" id="btnCopySql">Copiar o SQL</button></li>
+        <li><b>Pegue o endereço e a chave.</b> No menu da esquerda, clique na engrenagem <b>Project Settings</b> e depois em <b>API</b> (ou <b>API Keys</b>). Copie o <b>Project URL</b> e a chave chamada <b>anon</b> ou <b>publishable</b>. <u>Nunca</u> copie a <b>service_role</b> ou <b>secret</b>.</li>
+        <li><b>Preencha aqui embaixo</b> os dois campos e invente uma <b>senha de criptografia</b> (8 ou mais caracteres, diferente de todas as suas outras). Toque em <b>Ativar sincronização</b>.</li>
+      </ol>
       <div class="group">
-        <label class="row"><span>Endereço do projeto</span><input type="text" id="syncUrl" placeholder="https://xxxx.supabase.co" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
-        <label class="row"><span>Chave pública</span><input type="text" id="syncKey" placeholder="anon ou publishable" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <label class="row"><span>Project URL</span><input type="text" id="syncUrl" placeholder="https://xxxx.supabase.co" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+        <label class="row"><span>Chave anon</span><input type="text" id="syncKey" placeholder="anon ou publishable" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
         <label class="row"><span>Senha de criptografia</span><input type="password" id="syncPass" autocomplete="new-password" placeholder="só você sabe"></label>
         <label class="row"><span>Repita a senha</span><input type="password" id="syncPass2" autocomplete="new-password"></label>
       </div>
@@ -325,7 +333,11 @@
       <button type="button" class="btn primary" id="btnSyncCreate">Ativar sincronização</button>
     </div>
     <div id="syncJoin" hidden>
-      <p class="note">No aparelho que já sincroniza, abra esta tela e copie o <b>código de pareamento</b>. Cole aqui e digite a mesma senha.</p>
+      <p class="note">Use no <b>outro aparelho</b> (por exemplo, o celular), depois que o primeiro já estiver sincronizando.</p>
+      <ol class="steps">
+        <li>No primeiro aparelho: <b>Mais → Sincronizar entre aparelhos</b> e toque em <b>Copiar ou compartilhar o código</b>. Mande o código para você mesmo (WhatsApp, e-mail ou Notas).</li>
+        <li>Neste aparelho, cole o código abaixo e digite <b>a mesma senha de criptografia</b>. Toque em <b>Conectar</b>.</li>
+      </ol>
       <div class="group">
         <label class="row"><span>Código</span><input type="text" id="syncCode" placeholder="MF1.…" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
         <label class="row"><span>Senha de criptografia</span><input type="password" id="syncPassJoin" autocomplete="current-password"></label>

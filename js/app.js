@@ -981,6 +981,10 @@ btnSyncJoin.addEventListener('click', async ()=>{
   catch(e){ syncCfg = null; saveSyncCfg(); syncMsg = {text:mapSyncError(e), err:true}; renderSync(); }
 });
 btnSyncNow.addEventListener('click', runSync);
+btnCopySql.addEventListener('click', async ()=>{
+  try{ await navigator.clipboard.writeText(FinSync.SQL_SETUP); showToast('SQL copiado ✓ Cole no SQL Editor do Supabase', 4000); }
+  catch(e){ showToast('Não consegui copiar. Abra docs/sincronizacao.sql no GitHub', 4500); }
+});
 btnSyncOff.addEventListener('click', ()=>{ syncCfg = null; saveSyncCfg(); syncMsg = {text:'Sincronização desativada neste aparelho.', err:false}; renderSync(); });
 btnCopyCode.addEventListener('click', async ()=>{
   const code = syncCodeShow.value;
