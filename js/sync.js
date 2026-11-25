@@ -109,6 +109,10 @@
       return u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(u.hostname));
     } catch (e) { return false; }
   }
+  // Só o endereço do site importa (https://codigo.supabase.co): tira caminho, barra final, /rest/v1 etc. que a pessoa copiou junto.
+  function normalizeUrl(url) {
+    try { return new URL(String(url).trim()).origin; } catch (e) { return String(url).trim().replace(/\/+$/, ''); }
+  }
   function makePairCode({ url, key, id }) {
     return 'MF1.' + btoa(unescape(encodeURIComponent(JSON.stringify({ u: url, k: key, i: id })))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   }
@@ -117,14 +121,14 @@
       const body = String(code).trim().replace(/^MF1\./, '').replace(/-/g, '+').replace(/_/g, '/');
       const data = JSON.parse(decodeURIComponent(escape(atob(body + '='.repeat((4 - (body.length % 4)) % 4)))));
       if (!validUrl(data.u) || !data.k || !UUID.test(data.i)) return null;
-      return { url: data.u.replace(/\/+$/, ''), key: data.k, id: data.i.toLowerCase() };
+      return { url: normalizeUrl(data.u), key: data.k, id: data.i.toLowerCase() };
     } catch (e) { return null; }
   }
 
   // ---- Servidor (Supabase: duas funções RPC, veja docs/sincronizacao.sql) ----
   function createClient({ url, key, fetchImpl }) {
     const doFetch = fetchImpl || ((...args) => globalThis.fetch(...args));
-    const base = url.replace(/\/+$/, '');
+    const base = normalizeUrl(url);
     const headers = { 'Content-Type': 'application/json', apikey: key };
     if (/^eyJ/.test(key)) headers.Authorization = 'Bearer ' + key; // chaves antigas são JWT; as novas só usam apikey
     async function call(name, body) {
@@ -231,5 +235,5 @@ grant execute on function public.mf_put(uuid, text, bigint) to anon;
 notify pgrst, 'reload schema';
 `;
 
-  return { SQL_SETUP, deriveKey, exportKey, importKey, encryptJSON, decryptJSON, mergeStates, normalize, signature, makePairCode, parsePairCode, validUrl, createClient, syncOnce, toB64, fromB64 };
+  return { SQL_SETUP, normalizeUrl, deriveKey, exportKey, importKey, encryptJSON, decryptJSON, mergeStates, normalize, signature, makePairCode, parsePairCode, validUrl, createClient, syncOnce, toB64, fromB64 };
 });

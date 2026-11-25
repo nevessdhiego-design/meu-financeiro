@@ -46,7 +46,7 @@ Os dados do app instalado ficam separados dos do Safari, então **faça o backup
 | Armazenamento | `localStorage` do navegador |
 | Planilhas | [SheetJS](https://sheetjs.com/) por CDN, com verificação de integridade (SRI) |
 | API opcional | Python, FastAPI e SQLite, em `backend/` (veja o [README do backend](backend/README.md)) |
-| Testes | `node --test` na lógica (51 testes) e `pytest` na API (13 testes), ambos na CI do GitHub |
+| Testes | `node --test` na lógica (52 testes) e `pytest` na API (13 testes), ambos na CI do GitHub |
 
 Decisões que valem destacar:
 

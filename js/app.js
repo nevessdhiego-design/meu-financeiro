@@ -964,11 +964,11 @@ syncMode.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{
   syncMsg = {text:'', err:false}; renderSync();
 }));
 btnSyncCreate.addEventListener('click', async ()=>{
-  const url = syncUrl.value.trim().replace(/\/+$/,''), key = syncKey.value.trim();
+  const url = FinSync.normalizeUrl(syncUrl.value), key = syncKey.value.trim();
   if(!FinSync.validUrl(url) || !key){ syncMsg = {text:'Preencha o endereço (https://…) e a chave pública.', err:true}; renderSync(); return; }
   if(syncPass.value.length<8){ syncMsg = {text:'Use uma senha de pelo menos 8 caracteres.', err:true}; renderSync(); return; }
   if(syncPass.value!==syncPass2.value){ syncMsg = {text:'As duas senhas não são iguais.', err:true}; renderSync(); return; }
-  syncMsg = {text:'Ativando…', err:false}; renderSync();
+  syncUrl.value = url; syncMsg = {text:'Ativando…', err:false}; renderSync();
   try{ await activateSync({url, key, id:crypto.randomUUID(), pass:syncPass.value}); syncPass.value = syncPass2.value = ''; if(syncCfg && syncCfg.error){ const e = new Error(syncCfg.error); const d = syncCfg.errorDetail||''; e.code = d.split(':')[0]||undefined; e.detail = d.slice(d.indexOf(':')+1).trim(); syncCfg = null; saveSyncCfg(); throw e; } }
   catch(e){ syncCfg = null; saveSyncCfg(); syncMsg = {text:mapSyncError(e), err:true}; renderSync(); }
 });

@@ -143,3 +143,13 @@ test('o SQL copiado pelo app é idêntico ao arquivo docs/sincronizacao.sql', ()
   const file = fs.readFileSync(require('node:path').join(__dirname, '..', 'docs', 'sincronizacao.sql'), 'utf8').replace(/\r\n/g, '\n');
   assert.equal(sync.SQL_SETUP, file);
 });
+
+test('endereço do projeto: tira /rest/v1, barras e caminhos colados junto', async () => {
+  assert.equal(sync.normalizeUrl(' https://abc.supabase.co/rest/v1/ '), 'https://abc.supabase.co');
+  assert.equal(sync.normalizeUrl('https://abc.supabase.co/dashboard/project/abc'), 'https://abc.supabase.co');
+  assert.equal(sync.normalizeUrl('http://127.0.0.1:8767/'), 'http://127.0.0.1:8767');
+  const calls = [];
+  const c = sync.createClient({ url: 'https://abc.supabase.co/rest/v1/', key: 'k', fetchImpl: async (u) => { calls.push(u); return { ok: true, json: async () => [] }; } });
+  await c.get('id1');
+  assert.equal(calls[0], 'https://abc.supabase.co/rest/v1/rpc/mf_get');
+});
