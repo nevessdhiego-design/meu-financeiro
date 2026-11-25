@@ -132,6 +132,7 @@
       if (!res.ok) {
         const err = new Error('http-' + res.status);
         err.status = res.status;
+        try { const info = await res.json(); err.code = info && info.code; } catch (e) { /* sem corpo */ }
         throw err;
       }
       return res.json();
@@ -225,6 +226,9 @@ revoke all on function public.mf_get(uuid) from public;
 revoke all on function public.mf_put(uuid, text, bigint) from public;
 grant execute on function public.mf_get(uuid) to anon;
 grant execute on function public.mf_put(uuid, text, bigint) to anon;
+
+-- Pede ao Supabase para reconhecer as funções novas agora (evita erro 404 logo após criar).
+notify pgrst, 'reload schema';
 `;
 
   return { SQL_SETUP, deriveKey, exportKey, importKey, encryptJSON, decryptJSON, mergeStates, normalize, signature, makePairCode, parsePairCode, validUrl, createClient, syncOnce, toB64, fromB64 };

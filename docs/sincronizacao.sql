@@ -56,3 +56,6 @@ revoke all on function public.mf_get(uuid) from public;
 revoke all on function public.mf_put(uuid, text, bigint) from public;
 grant execute on function public.mf_get(uuid) to anon;
 grant execute on function public.mf_put(uuid, text, bigint) to anon;
+
+-- Pede ao Supabase para reconhecer as funções novas agora (evita erro 404 logo após criar).
+notify pgrst, 'reload schema';

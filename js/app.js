@@ -910,7 +910,7 @@ function syncErrorText(e){
   if(m==='sem-dados') return 'Não encontrei dados com este código. Confira o código.';
   if(m==='conflito') return 'Dois aparelhos gravaram ao mesmo tempo. Tente de novo.';
   if(m==='http-401' || m==='http-403') return 'O Supabase recusou a chave. Confira o endereço e a chave pública.';
-  if(m==='http-404') return 'As funções do Supabase não existem. Rode o SQL de docs/sincronizacao.sql.';
+  if(m==='http-404') return 'O Supabase não achou as funções mf_get e mf_put. Confira: 1) o SQL deu Success (Run) no SQL Editor DESTE projeto; 2) o Project URL é deste mesmo projeto. Se já rodou, espere 1 minuto e tente de novo.';
   if(e && e.name==='TypeError') return 'Sem conexão com o servidor. Confira a internet e o endereço.';
   return 'Não foi possível sincronizar agora.';
 }
