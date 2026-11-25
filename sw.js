@@ -1,4 +1,4 @@
-const CACHE_NAME = 'meu-financeiro-v16';
+const CACHE_NAME = 'meu-financeiro-v17';
 const APP_SHELL = [
   './',
   './index.html',
@@ -29,12 +29,12 @@ self.addEventListener('fetch', event => {
   if(requestUrl.origin !== self.location.origin) return;
 
   if(event.request.mode === 'navigate'){
-    event.respondWith(fetch(event.request).catch(() => caches.match('./index.html')));
+    event.respondWith(fetch(event.request, {cache:'no-cache'}).catch(() => caches.match('./index.html')));
     return;
   }
 
   // Rede primeiro: o app novo chega na hora, sem ficar com um arquivo velho do cache. Offline, usa o cache.
-  event.respondWith(fetch(event.request).then(response => {
+  event.respondWith(fetch(event.request, {cache:'no-cache'}).then(response => {
     if(response.ok){
       const copy = response.clone();
       caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));

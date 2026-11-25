@@ -899,6 +899,7 @@ btnIosHintClose.addEventListener('click', ()=>{
 // ---- Render geral ----
 
 // ---- Sincronização entre aparelhos (criptografada; veja docs/sincronizacao.md) ----
+const APP_VERSION = 'v17'; // igual ao cache do sw.js
 const SYNC_KEY = 'meu-financeiro-sync';
 let syncCfg = null, syncTimer = null, syncBusy = false, syncMsg = {text:'', err:false};
 function loadSyncCfg(){ try{ syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)||'null'); }catch(e){ syncCfg = null; } }
@@ -915,6 +916,7 @@ function syncErrorText(e){
   return 'Não foi possível sincronizar agora.';
 }
 function renderSync(){
+  appVersion.textContent = `Versão do app: ${APP_VERSION}`;
   const on = Boolean(syncCfg);
   syncOff.hidden = on; syncOn.hidden = !on;
   syncSub.textContent = !on ? 'Notebook e celular, com criptografia'
