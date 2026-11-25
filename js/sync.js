@@ -132,7 +132,7 @@
       if (!res.ok) {
         const err = new Error('http-' + res.status);
         err.status = res.status;
-        try { const info = await res.json(); err.code = info && info.code; } catch (e) { /* sem corpo */ }
+        try { const info = await res.json(); err.code = info && info.code; err.detail = String((info && (info.message || info.hint)) || '').slice(0, 200); } catch (e) { /* sem corpo */ }
         throw err;
       }
       return res.json();

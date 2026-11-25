@@ -910,7 +910,7 @@ function syncErrorText(e){
   if(m==='sem-dados') return 'Não encontrei dados com este código. Confira o código.';
   if(m==='conflito') return 'Dois aparelhos gravaram ao mesmo tempo. Tente de novo.';
   if(m==='http-401' || m==='http-403') return 'O Supabase recusou a chave. Confira o endereço e a chave pública.';
-  if(m==='http-404') return 'O Supabase não achou as funções mf_get e mf_put. Confira: 1) o SQL deu Success (Run) no SQL Editor DESTE projeto; 2) o Project URL é deste mesmo projeto. Se já rodou, espere 1 minuto e tente de novo.';
+  if(m==='http-404') return 'O Supabase não achou as funções mf_get e mf_put. Confira: 1) o SQL deu Success (Run) no SQL Editor DESTE projeto; 2) o Project URL é deste mesmo projeto; 3) em Project Settings → Data API, a API está ligada e o schema public está exposto. Depois espere 1 minuto e tente de novo.';
   if(e && e.name==='TypeError') return 'Sem conexão com o servidor. Confira a internet e o endereço.';
   return 'Não foi possível sincronizar agora.';
 }
@@ -919,7 +919,7 @@ function renderSync(){
   syncOff.hidden = on; syncOn.hidden = !on;
   syncSub.textContent = !on ? 'Notebook e celular, com criptografia'
     : syncBusy ? 'Sincronizando…' : syncCfg.error ? 'Ativa · com erro' : syncCfg.last ? `Ativa · última: ${syncWhen(syncCfg.last)}` : 'Ativa';
-  const text = syncBusy ? 'Sincronizando…' : on ? (syncCfg.error ? syncErrorText({message:syncCfg.error}) : syncCfg.last ? `Última sincronização: ${syncWhen(syncCfg.last)}` : '') : syncMsg.text;
+  const text = syncBusy ? 'Sincronizando…' : on ? (syncCfg.error ? syncErrorText({message:syncCfg.error}) + (syncCfg.errorDetail ? ` [${syncCfg.errorDetail}]` : '') : syncCfg.last ? `Última sincronização: ${syncWhen(syncCfg.last)}` : '') : syncMsg.text;
   syncStatus.textContent = text; syncStatus.classList.toggle('err', Boolean(on ? syncCfg.error : syncMsg.err));
   if(on) syncCodeShow.value = FinSync.makePairCode({url:syncCfg.url, key:syncCfg.key, id:syncCfg.id});
 }
@@ -937,15 +937,15 @@ async function runSync(){
     const key = await FinSync.importKey(syncCfg.keyB64);
     const client = FinSync.createClient({url:syncCfg.url, key:syncCfg.key});
     const r = await FinSync.syncOnce({client, key, syncId:syncCfg.id, getLocal:getSyncState, applyMerged});
-    syncCfg.last = r.at; delete syncCfg.error;
-  }catch(e){ syncCfg.error = (e && e.message) || 'erro'; if(e && e.name==='TypeError') syncCfg.error = 'TypeError'; console.warn('sincronização falhou:', e && e.message); }
+    syncCfg.last = r.at; delete syncCfg.error; delete syncCfg.errorDetail;
+  }catch(e){ syncCfg.error = (e && e.message) || 'erro'; syncCfg.errorDetail = e && e.code ? `${e.code}: ${e.detail||''}` : ''; if(e && e.name==='TypeError') syncCfg.error = 'TypeError'; console.warn('sincronização falhou:', e && e.message); }
   syncBusy = false; saveSyncCfg(); renderSync();
 }
 function scheduleSync(){
   if(!syncCfg) return;
   clearTimeout(syncTimer); syncTimer = setTimeout(runSync, 2500);
 }
-function mapSyncError(e){ return syncErrorText(e && e.name==='TypeError' ? {name:'TypeError'} : e); }
+function mapSyncError(e){ return syncErrorText(e && e.name==='TypeError' ? {name:'TypeError'} : e) + (e && e.code ? ` [${e.code}: ${e.detail||''}]` : ''); }
 async function activateSync({url, key, id, pass, joining}){
   const derived = await FinSync.deriveKey(pass, id);
   const keyB64 = await FinSync.exportKey(derived);
@@ -969,7 +969,7 @@ btnSyncCreate.addEventListener('click', async ()=>{
   if(syncPass.value.length<8){ syncMsg = {text:'Use uma senha de pelo menos 8 caracteres.', err:true}; renderSync(); return; }
   if(syncPass.value!==syncPass2.value){ syncMsg = {text:'As duas senhas não são iguais.', err:true}; renderSync(); return; }
   syncMsg = {text:'Ativando…', err:false}; renderSync();
-  try{ await activateSync({url, key, id:crypto.randomUUID(), pass:syncPass.value}); syncPass.value = syncPass2.value = ''; if(syncCfg && syncCfg.error){ const e = syncCfg.error; syncCfg = null; saveSyncCfg(); throw new Error(e); } }
+  try{ await activateSync({url, key, id:crypto.randomUUID(), pass:syncPass.value}); syncPass.value = syncPass2.value = ''; if(syncCfg && syncCfg.error){ const e = new Error(syncCfg.error); const d = syncCfg.errorDetail||''; e.code = d.split(':')[0]||undefined; e.detail = d.slice(d.indexOf(':')+1).trim(); syncCfg = null; saveSyncCfg(); throw e; } }
   catch(e){ syncCfg = null; saveSyncCfg(); syncMsg = {text:mapSyncError(e), err:true}; renderSync(); }
 });
 btnSyncJoin.addEventListener('click', async ()=>{
@@ -977,7 +977,7 @@ btnSyncJoin.addEventListener('click', async ()=>{
   if(!p){ syncMsg = {text:'Código inválido. Copie de novo, inteiro.', err:true}; renderSync(); return; }
   if(!syncPassJoin.value){ syncMsg = {text:'Digite a senha de criptografia.', err:true}; renderSync(); return; }
   syncMsg = {text:'Conectando…', err:false}; renderSync();
-  try{ await activateSync({...p, pass:syncPassJoin.value, joining:true}); syncPassJoin.value = ''; syncCode.value = ''; if(syncCfg && syncCfg.error){ const e = syncCfg.error; syncCfg = null; saveSyncCfg(); throw new Error(e); } }
+  try{ await activateSync({...p, pass:syncPassJoin.value, joining:true}); syncPassJoin.value = ''; syncCode.value = ''; if(syncCfg && syncCfg.error){ const e = new Error(syncCfg.error); const d = syncCfg.errorDetail||''; e.code = d.split(':')[0]||undefined; e.detail = d.slice(d.indexOf(':')+1).trim(); syncCfg = null; saveSyncCfg(); throw e; } }
   catch(e){ syncCfg = null; saveSyncCfg(); syncMsg = {text:mapSyncError(e), err:true}; renderSync(); }
 });
 btnSyncNow.addEventListener('click', runSync);
