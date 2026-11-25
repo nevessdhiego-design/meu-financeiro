@@ -3,12 +3,13 @@
 const { fmt, pct, escapeHtml, pad2, todayISO, curMonth, shiftMonth, monthLabel, monthShort, normalizeImportText,
         parseImportNumber, parseImportDate, monthlyTotals, matchesSearch, backupStatus,
         dayLabel, groupByDay, categoryTotals, monthSummary, installmentSchedule, dataWarnings, recategorize,
-        applyCategoryToSimilar, isNeutral, parseInstallment, ruleKey, guessCategory, importSanity, accountBalance, cardSummary, fixInstallmentDates } = FinLib;
+        applyCategoryToSimilar, isNeutral, parseInstallment, ruleKey, guessCategory, importSanity, accountBalance, cardSummary, fixInstallmentDates, suggestFatura, neutralSummary, NEUTRAL_CATEGORIES } = FinLib;
 
 let transactions = [];
 let editingId = null;
 let pendingDeleteId = null;
 let pendingImport = [];
+let pendingUpdates = []; // lançamentos que já existem e vão ganhar a etiqueta da fatura
 let pendingRestore = null;
 let firstUseMonthValue = null; // mantido só para compatibilidade com backups antigos
 let selectedMonth = curMonth();
@@ -22,7 +23,7 @@ let categoryRules = {}; // categorias que o Dhiego ensinou: { 'Saída:padaria jo
 const DEFAULT_CONFIG = {
   salario:3200, dias:22, vr:28, vt:12, faculdade:650, celular:180, parcelasRestantes:8, cartao:800,
   lazer:400, investAlvo:300, metaReserva:10000, metaPatrim:100000, reservaAtual:2500, patrimAtual:0, metas:{},
-  saldoInicial:0, saldoData:'', cartaoLimite:0, cartaoFecha:0, cartaoVence:0
+  saldoInicial:0, saldoData:'', cartaoLimite:0, cartaoFecha:0, cartaoVence:0, faturasPagas:{}
 };
 let config = {...DEFAULT_CONFIG};
 const STORAGE_KEY = 'meu-financeiro-v1';
@@ -278,25 +279,28 @@ function renderGeral(){
   cSaidas.textContent = fmt(S.saidas - S.noCartao);
   cNote.textContent = S.faturasPagas ? `Pagou de fatura neste mês: ${fmt(S.faturasPagas)} (já contado nas compras do cartão)` : '';
 
-  // 2) Cartão: fatura aberta, última fatura e limite
+  // 2) Cartão: fatura aberta, faturas fechadas a pagar e limite
   const card = cardSummary(transactions, config, hoje);
   kAberta.textContent = fmt(card.aberta.total);
   kSub.textContent = card.configurado ? 'fatura aberta' : 'compras do mês';
   kPill.textContent = card.configurado ? `Fecha ${dd(card.aberta.end)}${card.aberta.due ? ' · vence '+dd(card.aberta.due) : ''}` : 'Informe fechamento e vencimento em Planejar';
   kBarWrap.hidden = !(card.limite>0);
   if(card.limite>0){ const r = card.usado/card.limite; kBar.style.width = Math.min(Math.max(r,0),1)*100+'%'; kBar.className = r>=1 ? 'over' : r>=.8 ? 'warn' : ''; }
-  if(card.fechada){
-    kFechadaLabel.textContent = `Última fatura${card.fechada.due ? ' (vence '+dd(card.fechada.due)+')' : ''}`;
-    kFechada.textContent = card.fechada.faltam>0 ? `${fmt(card.fechada.faltam)} a pagar` : `${fmt(card.fechada.total)} paga`;
-  }else{ kFechadaLabel.textContent = 'Última fatura'; kFechada.textContent = '—'; }
+  kFechadaLabel.textContent = card.pendentes.length ? `A pagar (${card.pendentes.length} fatura${card.pendentes.length===1?'':'s'})` : 'Faturas fechadas';
+  kFechada.textContent = card.pendentes.length ? fmt(card.aPagar) : 'nada a pagar';
+  kList.innerHTML = card.pendentes.map(i=>
+    `<div class="kRow"><span>Vence ${dd(i.due)||i.key}${i.status==='vencida'?' · vencida':''}${i.pago>0?' · pago '+fmt(i.pago):''}</span><b class="money">${fmt(i.faltam)}</b><button type="button" data-paga="${escapeHtml(i.key)}">Já paguei</button></div>`).join('');
   kLivre.textContent = card.limite>0 ? fmt(Math.max(card.livre,0)) : '—';
-  kNote.textContent = card.limite>0 ? `${fmt(card.usado)} do limite de ${fmt(card.limite)} em uso: fatura aberta + última não paga + ${fmt(card.parcelas)} em parcelas que ainda vão vir` : '';
+  kNote.textContent = card.limite>0 ? `${fmt(card.usado)} do limite de ${fmt(card.limite)} em uso: fatura aberta + faturas a pagar + ${fmt(card.parcelas)} em parcelas que ainda vão vir` : '';
 
   // 3) Resultado do mês: tudo que foi gasto, na conta ou no cartão
   heroMonth.textContent = monthLabel(selectedMonth);
   hSaldo.textContent = fmt(S.resultado);
   hEntradas.textContent = fmt(S.entradas); hSaidas.textContent = fmt(S.saidas);
   hSaidasConta.textContent = fmt(S.saidas - S.noCartao); hSaidasCartao.textContent = fmt(S.noCartao);
+  const neutros = neutralSummary(transactions, selectedMonth);
+  neutrosNote.hidden = !neutros.length;
+  neutrosNote.innerHTML = neutros.length ? `Não contam como gasto nem ganho: ${neutros.map(n=>`${escapeHtml(n.categoria)} <span class="money">${fmt(n.total)}</span> (${n.n})`).join(' · ')}. <button type="button" id="btnVerNeutros">Ver</button>` : '';
   heroPill.textContent = S.entradas>0
     ? (S.saidas>S.entradas ? 'Saídas acima das entradas' : `${pct(S.saidas/S.entradas)} das entradas gastas`)
     : (S.saidas>0 ? 'Sem entradas neste mês' : '');
@@ -407,10 +411,16 @@ function filteredList(){
     (!fMes.value || (t.data||'').startsWith(fMes.value)) &&
     (!fCategoria.value || t.categoria===fCategoria.value) &&
     (!tipoFilter || t.tipo===tipoFilter) &&
-    (!viewFilter || (viewFilter==='cartao' ? t.forma==='Crédito' : t.forma!=='Crédito')) &&
+    (!viewFilter || (viewFilter==='neutros' ? isNeutral(t) : viewFilter==='cartao' ? t.forma==='Crédito' : t.forma!=='Crédito')) &&
     matchesSearch(t, fBusca.value)
   );
 }
+document.addEventListener('click', e=>{
+  if(!e.target.closest('#btnVerNeutros')) return;
+  viewFilter = 'neutros'; fMes.value = selectedMonth; goTab('lanc');
+  viewChips.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x.dataset.v==='neutros'));
+  render();
+});
 viewChips.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{
   viewFilter = b.dataset.v;
   viewChips.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
@@ -433,15 +443,15 @@ function renderLancamentos(){
   for(const t of filtered){
     const v = Number(t.valor)||0;
     // Na visão Conta, pagamento de fatura e transferência próprias contam (mexem na conta); nas outras, ficam de fora.
-    if(viewFilter==='conta' || !isNeutral(t)){ if(t.tipo==='Entrada') entradas += v; else saidas += v; }
+    if(viewFilter==='conta' || viewFilter==='neutros' || !isNeutral(t)){ if(t.tipo==='Entrada') entradas += v; else saidas += v; }
     if(t.pago==='Não') naoPago++;
   }
-  const rotulos = viewFilter==='cartao' ? ['Fatura (compras − estornos)','Estornos','Compras'] : viewFilter==='conta' ? ['Movimento da conta','Entrou','Saiu'] : ['Resultado','Entradas','Saídas'];
+  const rotulos = viewFilter==='neutros' ? ['Saldo destes itens','Entrou','Saiu'] : viewFilter==='cartao' ? ['Fatura (compras − estornos)','Estornos','Compras'] : viewFilter==='conta' ? ['Movimento da conta','Entrou','Saiu'] : ['Resultado','Entradas','Saídas'];
   lbSaldo.textContent = rotulos[0]; lbEntradas.textContent = rotulos[1]; lbSaidas.textContent = rotulos[2];
   vSaldo.textContent = fmt(viewFilter==='cartao' ? saidas-entradas : entradas-saidas);
   vEntradas.textContent = fmt(entradas); vSaidas.textContent = fmt(saidas);
   viewNote.hidden = !viewFilter;
-  viewNote.textContent = viewFilter==='cartao' ? 'Só compras no crédito. O pagamento da fatura aparece na visão Conta.'
+  viewNote.textContent = viewFilter==='neutros' ? 'Pagamento de fatura, transferência entre contas suas e resgate: não entram em gastos nem ganhos. Se algum não deveria estar aqui, toque nele e troque a categoria.' : viewFilter==='cartao' ? 'Só compras no crédito. O pagamento da fatura aparece na visão Conta.'
     : viewFilter==='conta' ? 'Só o que entrou e saiu da conta (débito, Pix, dinheiro…). Compras no crédito aparecem na visão Cartão.' : '';
   pendMsg.hidden = naoPago===0;
   if(naoPago>0) pendMsg.innerHTML = `<b>${naoPago}</b> lançamento${naoPago===1?'':'s'} marcado${naoPago===1?'':'s'} como "Não pago"`;
@@ -507,6 +517,12 @@ metasList.addEventListener('click', e=>{
   config = {...config, metas}; saveLocalState(); render();
 });
 
+kList.addEventListener('click', e=>{
+  const b = e.target.closest('button[data-paga]'); if(!b) return;
+  config = {...config, faturasPagas:{...(config.faturasPagas||{}), [b.dataset.paga]:true}};
+  saveLocalState(); render(); showToast('Fatura marcada como paga ✓');
+});
+
 // ---- Atenção: o que não bate nos números ----
 function renderInsights(){
   const warns = dataWarnings(transactions, selectedMonth);
@@ -534,9 +550,12 @@ function reanalisar(){
   if(!r.changed){ showToast('Tudo já está classificado: nada para mudar', 3200); return; }
   const groups = {};
   r.changes.forEach(c=>{ const k = `${c.de} → ${c.para}`; groups[k] = (groups[k]||0)+1; });
+  const byId = new Map(transactions.map(t=>[t.id,t]));
+  const novosNeutros = r.changes.filter(c=>NEUTRAL_CATEGORIES.includes(c.para) && !NEUTRAL_CATEGORIES.includes(c.de));
+  const totalNeutros = sum(novosNeutros, c=>Number((byId.get(c.id)||{}).valor)||0);
   const resumo = Object.entries(groups).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,n])=>`${n}× ${k}`).join(String.fromCharCode(10));
   const NL = String.fromCharCode(10);
-  if(!window.confirm(`Reanalisar vai mudar a categoria de ${r.changed} lançamento(s):${NL}${NL}${resumo}${NL}${NL}Os que você corrigiu à mão não mudam. Continuar?`)) return;
+  if(!window.confirm(`Reanalisar vai mudar a categoria de ${r.changed} lançamento(s):${NL}${NL}${resumo}${NL}${NL}${novosNeutros.length ? `Atenção: ${novosNeutros.length} deles (${fmt(totalNeutros)}) passam a NÃO contar como gasto nem ganho.${NL}${NL}` : ''}Os que você corrigiu à mão não mudam. Continuar?`)) return;
   transactions = r.transactions; saveLocalState(); render();
   showToast(`${r.changed} lançamento(s) reclassificado(s) ✓`, 3200);
 }
@@ -757,18 +776,28 @@ function buildImportList(){
   const list = importSource.kind==='xlsx' ? importSource.items
     : bankTransactions(importSource.parsed.items, {invert:importInvert.checked, isCard:importCard.checked, rules:categoryRules});
   importIgnored = importSource.kind==='xlsx' ? 0 : importSource.parsed.items.length - list.length;
-  return markDuplicates(transactions, list);
+  const card = importSource.kind==='bank' && importCard.checked;
+  importFaturaRow.hidden = !card;
+  let tagged = list;
+  if(card){
+    if(!importFaturaMes.value){ const sug = suggestFatura(list, config); if(sug) importFaturaMes.value = sug; }
+    const tag = importFaturaMes.value;
+    if(tag) tagged = list.map(t=>({...t, fatura:tag}));
+  }
+  return markDuplicates(transactions, tagged);
 }
 function renderImportPreview(){
   const all = buildImportList();
   const fresh = all.filter(i=>!i.duplicado);
   const dups = all.length - fresh.length;
   pendingImport = fresh;
+  pendingUpdates = all.filter(i=>i.duplicado && i.existingId && i.fatura);
   const totalIn = sum(fresh, t=>(t.tipo==='Entrada' && !isNeutral(t)) ? (Number(t.valor)||0) : 0);
   const totalOut = sum(fresh, t=>(t.tipo==='Entrada' || isNeutral(t)) ? 0 : (Number(t.valor)||0));
   const warns = importSource && importSource.kind==='bank' ? importSanity(fresh, {isCard:importCard.checked}) : [];
   const pdfParsed = importSource && importSource.pdf ? importSource.parsed : null;
-  const ignoredText = (importIgnored ? ` ${importIgnored} pagamento(s) de fatura ignorado(s), pois já aparecem como saída na conta.` : '')
+  const updText = pendingUpdates.length ? ` ${pendingUpdates.length} lançamento(s) que já existem serão atualizados para a fatura que vence em ${importFaturaMes.value} (isso junta a fatura no lugar certo).` : '';
+  const ignoredText = updText + (importIgnored ? ` ${importIgnored} pagamento(s) de fatura ignorado(s), pois já aparecem como saída na conta.` : '')
     + (pdfParsed ? ` PDF lido pelo texto: confira cada linha.` + (pdfParsed.uncertain ? ` Em ${pdfParsed.uncertain} item(ns) o PDF não indica entrada ou saída e marquei como saída.` : '') : '');
   if(!all.length && !importIgnored){
     const p = importSource && importSource.kind==='bank' ? importSource.parsed : null;
@@ -788,10 +817,11 @@ function renderImportPreview(){
   importPreview.innerHTML = fresh.length
     ? `<table class="previewTable"><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th></tr></thead><tbody>${fresh.slice(0,20).map(item=>`<tr><td>${escapeHtml(item.data ? item.data.slice(8,10)+'/'+item.data.slice(5,7) : '—')}</td><td>${escapeHtml(item.descricao)}</td><td>${escapeHtml(item.categoria)}</td><td>${item.tipo==='Entrada'?'+':'−'} ${fmt(item.valor)}</td></tr>`).join('')}</tbody></table>${fresh.length>20?'<div class="hint">Mostrando os 20 primeiros itens.</div>':''}`
     : '<div class="empty">Nada novo para importar.</div>';
-  btnConfirmImport.disabled = fresh.length===0;
+  btnConfirmImport.disabled = fresh.length===0 && pendingUpdates.length===0;
 }
 importCard.addEventListener('change', renderImportPreview);
 importInvert.addEventListener('change', renderImportPreview);
+importFaturaMes.addEventListener('change', renderImportPreview);
 
 fileInput.addEventListener('change', async e=>{
   const file = e.target.files[0]; e.target.value = '';
@@ -810,7 +840,7 @@ fileInput.addEventListener('change', async e=>{
       importSource = {kind:'bank', parsed, pdf:true};
       importCard.checked = Boolean(parsed.cardHint);
       importInvert.checked = Boolean(parsed.invertHint);
-      importOptions.hidden = false;
+      importOptions.hidden = false; importFaturaMes.value = '';
       renderImportPreview();
       importModal.showModal();
       return;
@@ -825,7 +855,7 @@ fileInput.addEventListener('change', async e=>{
       importSource = {kind:'bank', parsed};
       importCard.checked = Boolean(parsed.cardHint);
       importInvert.checked = Boolean(parsed.invertHint);
-      importOptions.hidden = false;
+      importOptions.hidden = false; importFaturaMes.value = '';
     }
     renderImportPreview();
     importModal.showModal();
@@ -834,9 +864,15 @@ fileInput.addEventListener('change', async e=>{
     showToast(err && err.message==='pdf-senha' ? 'PDF protegido: senha não aceita' : err && err.message==='pdf-lib' ? 'Não consegui carregar o leitor de PDF (precisa de internet na primeira vez)' : 'Não foi possível ler o arquivo', 5000);
   }
 });
-btnCancelImport.addEventListener('click', ()=>{ pendingImport=[]; importSource=null; importModal.close(); });
+btnCancelImport.addEventListener('click', ()=>{ pendingImport=[]; pendingUpdates=[]; importSource=null; importModal.close(); });
 btnConfirmImport.addEventListener('click', ()=>{
   const items = pendingImport; pendingImport = []; importSource = null;
+  const ups = pendingUpdates; pendingUpdates = [];
+  ups.forEach(u=>{
+    const tx = transactions.find(x=>x.id===u.existingId); if(!tx) return;
+    tx.fatura = u.fatura;
+    if(u.dataOriginal && tx.data===u.dataOriginal){ tx.dataOriginal = u.dataOriginal; tx.data = u.data; }
+  });
   items.forEach((item,i)=>{
     const {duplicado, ...t} = item;
     t.id = 'tx_' + Date.now() + '_' + i + '_' + Math.random().toString(36).slice(2,6);
@@ -848,7 +884,7 @@ btnConfirmImport.addEventListener('click', ()=>{
   importModal.close();
   setMonth(target);
   if(items.length) goTab('lanc');
-  showToast(items.length ? `${items.length} lançamento(s) importado(s) ✓` : 'Nenhum lançamento importado');
+  showToast(items.length || ups.length ? `${items.length} importado(s)${ups.length ? ', '+ups.length+' atualizado(s)' : ''} ✓` : 'Nenhum lançamento importado');
 });
 
 // ---- Exportar planilha ----
@@ -912,7 +948,7 @@ btnIosHintClose.addEventListener('click', ()=>{
 // ---- Render geral ----
 
 // ---- Sincronização entre aparelhos (criptografada; veja docs/sincronizacao.md) ----
-const APP_VERSION = 'v19'; // igual ao cache do sw.js
+const APP_VERSION = 'v20'; // igual ao cache do sw.js
 const SYNC_KEY = 'meu-financeiro-sync';
 let syncCfg = null, syncTimer = null, syncBusy = false, syncMsg = {text:'', err:false};
 function loadSyncCfg(){ try{ syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)||'null'); }catch(e){ syncCfg = null; } }

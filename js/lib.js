@@ -608,19 +608,19 @@
   }
 
   function contentKey(t) {
-    return `${t.data}|${Math.abs(Number(t.valor) || 0).toFixed(2)}|${t.tipo}|${normalizeText(t.descricao)}`;
+    return `${t.dataOriginal || t.data}|${Math.abs(Number(t.valor) || 0).toFixed(2)}|${t.tipo}|${normalizeText(t.descricao)}`;
   }
 
   // Marca como duplicado o que já existe (mesmo identificador do banco ou mesmo dia, valor, tipo e descrição).
   // Dois lançamentos iguais no mesmo arquivo continuam valendo: cada um só consome um existente.
   function markDuplicates(existing, incoming) {
-    const refs = new Set(existing.map((t) => t.ref).filter(Boolean));
-    const counts = new Map();
-    for (const t of existing) counts.set(contentKey(t), (counts.get(contentKey(t)) || 0) + 1);
+    const refs = new Map(existing.filter((t) => t.ref).map((t) => [t.ref, t.id]));
+    const byKey = new Map();
+    for (const t of existing) { const k = contentKey(t); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(t.id); }
     return incoming.map((item) => {
-      if (item.ref && refs.has(item.ref)) return { ...item, duplicado: true };
-      const key = contentKey(item), left = counts.get(key) || 0;
-      if (left > 0) { counts.set(key, left - 1); return { ...item, duplicado: true }; }
+      if (item.ref && refs.has(item.ref)) return { ...item, duplicado: true, existingId: refs.get(item.ref) };
+      const ids = byKey.get(contentKey(item));
+      if (ids && ids.length) return { ...item, duplicado: true, existingId: ids.shift() };
       return { ...item, duplicado: false };
     });
   }
@@ -679,31 +679,81 @@
     return { start, end, due };
   }
 
+  // Cada compra no crédito pertence a uma FATURA, identificada pelo mês do vencimento ("2026-12"). Quem importou a fatura
+  // grava a etiqueta (fatura) em cada lançamento; os demais caem na fatura pelo dia de fechamento. Assim as parcelas com a
+  // data da compra original, ou um fechamento informado errado, não espalham a mesma fatura em duas.
+  const faturaOf = (t, fecha, vence) => {
+    if (t.fatura) return t.fatura;
+    if (fecha >= 1 && fecha <= 31) { const c = invoiceCycle(t.data, fecha, vence); return (c.due || c.end).slice(0, 7); }
+    return String(t.data).slice(0, 7);
+  };
+  const cardDays = (config) => [Math.round(Number(config.cartaoFecha)) || 0, Math.round(Number(config.cartaoVence)) || 0];
+  function faturaKey(t, config) { const [f, v] = cardDays(config); return faturaOf(t, f, v); }
+  // Fatura sugerida para um arquivo importado: a da compra à vista mais recente dele.
+  function suggestFatura(items, config) {
+    const anchor = installmentAnchor(items);
+    return anchor ? faturaKey({ data: anchor }, config) : '';
+  }
+
   function cardSummary(transactions, config, refISO) {
-    const fecha = Math.round(Number(config.cartaoFecha)) || 0, vence = Math.round(Number(config.cartaoVence)) || 0;
+    const [fecha, vence] = cardDays(config);
     const limite = Number(config.cartaoLimite) || 0;
-    const compras = transactions.filter((t) => t.forma === 'Crédito' && !isNeutral(t) && t.data);
-    const total = (a, b) => compras.filter((t) => t.data >= a && t.data <= b).reduce((s, t) => s + (t.tipo === 'Entrada' ? -1 : 1) * (Number(t.valor) || 0), 0);
-    let aberta, fechada = null;
-    if (fecha >= 1 && fecha <= 31) {
-      const cyc = invoiceCycle(refISO, fecha, vence);
-      aberta = { ...cyc, total: total(cyc.start, cyc.end) };
-      const prev = invoiceCycle(addDaysISO(cyc.start, -1), fecha, vence);
-      const prevTotal = total(prev.start, prev.end);
-      if (prevTotal > 0) {
-        const pago = transactions.filter((t) => t.categoria === 'Fatura paga' && t.tipo === 'Saída' && t.pago !== 'Não' && t.data > prev.end && t.data <= refISO)
-          .reduce((s, t) => s + (Number(t.valor) || 0), 0);
-        fechada = { ...prev, total: prevTotal, pago, faltam: Math.max(prevTotal - pago, 0) };
-      }
-    } else {
-      const [y, m] = refISO.split('-').map(Number);
-      const start = isoDay(y, m, 1), end = isoDay(y, m, 31);
-      aberta = { start, end, due: '', total: total(start, end) };
+    const configurado = fecha >= 1 && fecha <= 31;
+    const manuais = config.faturasPagas || {};
+    const map = new Map();
+    const touch = (key) => { if (!map.has(key)) map.set(key, { key, total: 0, n: 0 }); return map.get(key); };
+    for (const t of transactions) {
+      if (t.forma !== 'Crédito' || isNeutral(t) || !t.data) continue;
+      const e = touch(faturaOf(t, fecha, vence));
+      e.total += (t.tipo === 'Entrada' ? -1 : 1) * (Number(t.valor) || 0);
+      e.n++;
     }
-    // Compra parcelada ocupa o limite pelo valor todo: as parcelas que ainda vão vir (da fatura aberta em diante) contam como limite em uso.
-    const parcelas = installmentSchedule(transactions, shiftMonth(aberta.end.slice(0, 7), -1), 6, true);
-    const usado = limite > 0 ? aberta.total + (fechada ? fechada.faltam : 0) + parcelas.total : 0;
-    return { configurado: fecha >= 1 && fecha <= 31, aberta, fechada, limite, usado, livre: limite > 0 ? limite - usado : 0, parcelas: parcelas.total };
+    const refKey = faturaOf({ data: refISO }, fecha, vence);
+    touch(refKey); // a fatura aberta existe mesmo sem compras
+    const invoices = [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+    const pays = transactions.filter((t) => t.categoria === 'Fatura paga' && t.tipo === 'Saída' && t.pago !== 'Não' && t.data)
+      .map((t) => ({ data: t.data, left: Number(t.valor) || 0 })).sort((a, b) => a.data.localeCompare(b.data));
+    for (const inv of invoices) {
+      const [y, m] = inv.key.split('-').map(Number);
+      inv.due = configurado && vence > 0 ? isoDay(y, m, vence) : '';
+      inv.end = configurado ? (vence === 0 || vence > fecha ? isoDay(y, m, fecha) : addMonthsISO(`${inv.key}-01`, -1, fecha)) : '';
+      inv.start = inv.end ? addDaysISO(addMonthsISO(inv.end, -1, fecha), 1) : '';
+      const ancora = inv.due || inv.end || `${inv.key}-28`;
+      let pago = 0;
+      if (!manuais[inv.key] && inv.total > 0) { // pagamentos de fatura perto do vencimento abatem esta fatura, um por vez
+        const from = addDaysISO(ancora, -35), to = addDaysISO(ancora, 10);
+        for (const p of pays) {
+          if (p.left <= 0 || p.data < from || p.data > to) continue;
+          const take = Math.min(p.left, inv.total - pago);
+          if (take <= 0) break;
+          pago += take; p.left -= take;
+        }
+      }
+      inv.pago = pago;
+      inv.paga = Boolean(manuais[inv.key]) || (inv.n > 0 && pago >= inv.total * 0.95);
+      inv.faltam = inv.paga ? 0 : Math.max(inv.total - pago, 0);
+      inv.status = inv.paga ? 'paga'
+        : inv.end && refISO <= inv.end ? 'aberta'
+        : inv.due && refISO > inv.due ? 'vencida'
+        : configurado ? 'fechada' : (inv.key === refKey ? 'aberta' : 'fechada');
+    }
+    const aberta = invoices.find((i) => i.status === 'aberta') || invoices.find((i) => i.key === refKey);
+    const pendentes = invoices.filter((i) => (i.status === 'fechada' || i.status === 'vencida') && i.faltam > 0.005);
+    const parcelas = installmentSchedule(transactions, shiftMonth((aberta.end || refISO).slice(0, 7), -1), 6, true);
+    const usado = limite > 0 ? aberta.total + pendentes.reduce((s, i) => s + i.faltam, 0) + parcelas.total : 0;
+    return { configurado, invoices, aberta, pendentes, aPagar: pendentes.reduce((s, i) => s + i.faltam, 0), limite, usado, livre: limite > 0 ? limite - usado : 0, parcelas: parcelas.total };
+  }
+
+  // O que NÃO conta como ganho nem gasto no mês (fatura paga, transferência própria, resgate): para mostrar e conferir.
+  function neutralSummary(transactions, month) {
+    const by = new Map();
+    for (const t of transactions) {
+      if (!isNeutral(t) || !String(t.data || '').startsWith(month)) continue;
+      const e = by.get(t.categoria) || { categoria: t.categoria, n: 0, total: 0 };
+      e.n++; e.total += Number(t.valor) || 0;
+      by.set(t.categoria, e);
+    }
+    return [...by.values()];
   }
 
   // Parcelas já lançadas que ainda vão cair nos próximos meses (a partir da última parcela vista de cada compra).
@@ -809,6 +859,6 @@
     decodeBytes, parseBankDate, parseMoney, parseCSV, parseBankCSV, parseOFX,
     pdfItemsToLines, parsePdfStatement, guessCategory, guessForma, bankTransactions, markDuplicates,
     NEUTRAL_CATEGORIES, isNeutral, parseInstallment, merchantKey, ruleKey, markInternalTransfers, importSanity,
-    monthSummary, accountBalance, invoiceCycle, cardSummary, fixInstallmentDates, installmentSchedule, dataWarnings, recategorize, applyCategoryToSimilar,
+    monthSummary, accountBalance, invoiceCycle, cardSummary, faturaKey, suggestFatura, neutralSummary, fixInstallmentDates, installmentSchedule, dataWarnings, recategorize, applyCategoryToSimilar,
   };
 });

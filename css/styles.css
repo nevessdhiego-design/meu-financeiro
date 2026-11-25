@@ -378,3 +378,11 @@ body.privacy .money,body.privacy .evoSvg,body.privacy .spark,body.privacy .stack
 .viewNote{margin:-4px 0 10px;}
 .viewNote[hidden]{display:none;}
 #view-lanc>.seg{margin-bottom:10px;}
+
+.kList{position:relative;z-index:2;display:grid;gap:6px;margin-top:10px;}
+.kList:empty{display:none;}
+.kRow{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:12px;background:rgba(255,255,255,.1);font-size:.8rem;}
+.kRow span{flex:1;min-width:0;}
+.kRow b{font-weight:700;}
+.kRow button{flex:none;padding:4px 10px;border-radius:999px;background:#fff;color:#111;font-size:.74rem;font-weight:700;}
+#neutrosNote button{color:var(--brand);font-weight:700;text-decoration:underline;padding:0 2px;}

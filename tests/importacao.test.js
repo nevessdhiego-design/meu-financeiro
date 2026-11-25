@@ -354,23 +354,64 @@ test('invoiceCycle: fatura aberta, fechamento e vencimento, inclusive virada de 
   assert.deepEqual(lib.invoiceCycle('2026-02-10', 31, 10), { start: '2026-02-01', end: '2026-02-28', due: '2026-03-10' }); // fechamento no dia 31 em mês curto
 });
 
-test('cardSummary: fatura aberta, última fechada com o que falta pagar e limite livre', () => {
+test('cardSummary: fatura aberta, fatura vencida com o que falta pagar e limite livre', () => {
   const t = [
-    { data: '2026-10-10', valor: 500, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras' }, // fatura fechada em 05/11
+    { data: '2026-10-10', valor: 500, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras' }, // fatura que vence 12/11
     { data: '2026-10-20', valor: 100, tipo: 'Saída', forma: 'Crédito', categoria: 'Lazer' },
-    { data: '2026-11-08', valor: 300, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras' }, // aberta
+    { data: '2026-11-08', valor: 300, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras' }, // fatura aberta (vence 12/12)
     { data: '2026-11-09', valor: 40, tipo: 'Entrada', forma: 'Crédito', categoria: 'Compras' }, // estorno
-    { data: '2026-11-10', valor: 400, tipo: 'Saída', forma: 'Pix', categoria: 'Fatura paga' }, // pagou parte da fechada
+    { data: '2026-11-10', valor: 400, tipo: 'Saída', forma: 'Pix', categoria: 'Fatura paga' }, // pagou parte da vencida
   ];
   const c = lib.cardSummary(t, { cartaoFecha: 5, cartaoVence: 12, cartaoLimite: 2000 }, '2026-11-15');
   assert.equal(c.configurado, true);
   assert.equal(c.aberta.total, 260);
   assert.equal(c.aberta.end, '2026-12-05');
-  assert.deepEqual([c.fechada.total, c.fechada.pago, c.fechada.faltam, c.fechada.due], [600, 400, 200, '2026-11-12']);
+  assert.equal(c.pendentes.length, 1);
+  assert.deepEqual([c.pendentes[0].total, c.pendentes[0].pago, c.pendentes[0].faltam, c.pendentes[0].due, c.pendentes[0].status], [600, 400, 200, '2026-11-12', 'vencida']);
   assert.deepEqual([c.usado, c.livre], [460, 1540]);
-  const sem = lib.cardSummary(t, {}, '2026-11-15'); // sem fechamento: usa o mês do calendário
+  const sem = lib.cardSummary(t, {}, '2026-11-15'); // sem fechamento: uma fatura por mês do calendário
   assert.equal(sem.configurado, false);
   assert.equal(sem.aberta.total, 260);
+  const marcada = lib.cardSummary(t, { cartaoFecha: 5, cartaoVence: 12, faturasPagas: { '2026-11': true } }, '2026-11-15');
+  assert.equal(marcada.pendentes.length, 0); // "marcar como paga" tira da lista
+});
+
+test('fatura pela etiqueta: compras de antes do fechamento ficam juntas na fatura importada', () => {
+  const t = [
+    { data: '2026-10-28', valor: 120, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras', fatura: '2026-12' },
+    { data: '2026-11-20', valor: 80, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras', fatura: '2026-12' },
+    { data: '2026-07-15', valor: 200, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras', fatura: '2026-12', descricao: 'Magalu - Parcela 4/10' },
+  ];
+  const c = lib.cardSummary(t, { cartaoFecha: 5, cartaoVence: 13 }, '2026-11-25');
+  assert.equal(c.aberta.key, '2026-12');
+  assert.equal(c.aberta.total, 400);
+  assert.equal(c.pendentes.length, 0);
+  assert.equal(lib.faturaKey({ data: '2026-11-20' }, { cartaoFecha: 5, cartaoVence: 13 }), '2026-12');
+  assert.equal(lib.suggestFatura([{ data: '2026-11-20', descricao: 'Padaria' }, { data: '2026-07-15', descricao: 'Magalu - Parcela 4/10' }], { cartaoFecha: 5, cartaoVence: 13 }), '2026-12');
+});
+
+test('reimportar a mesma fatura reconhece os lançamentos (pela data original) e devolve o id para atualizar', () => {
+  const existing = [
+    { id: 'a', data: '2026-07-15', valor: 200, tipo: 'Saída', descricao: 'Magalu - Parcela 4/10' }, // importado antes, com a data original
+    { id: 'b', data: '2026-11-04', valor: 120, tipo: 'Saída', descricao: 'Pizzaria', ref: 'R1' },
+  ];
+  const incoming = lib.bankTransactions([
+    { data: '2026-11-04', valor: 120, descricao: 'Pizzaria', ref: 'R1' },
+    { data: '2026-07-15', valor: 200, descricao: 'Magalu - Parcela 4/10' },
+    { data: '2026-11-06', valor: 30, descricao: 'Padaria' },
+  ], { isCard: true, invert: true });
+  const mark = lib.markDuplicates(existing, incoming);
+  assert.deepEqual(mark.map((m) => [m.duplicado, m.existingId]), [[true, 'b'], [true, 'a'], [false, undefined]]);
+});
+
+test('neutralSummary mostra o que ficou de fora das contas no mês', () => {
+  const r = lib.neutralSummary([
+    { data: '2026-11-05', valor: 400, tipo: 'Saída', categoria: 'Fatura paga' },
+    { data: '2026-11-06', valor: 100, tipo: 'Saída', categoria: 'Transferência própria' },
+    { data: '2026-11-06', valor: 100, tipo: 'Entrada', categoria: 'Transferência própria' },
+    { data: '2026-10-06', valor: 9, tipo: 'Saída', categoria: 'Resgate' },
+  ], '2026-11');
+  assert.deepEqual(r.map((x) => [x.categoria, x.n, x.total]), [['Fatura paga', 1, 400], ['Transferência própria', 2, 200]]);
 });
 
 test('monthSummary soma as faturas pagas do mês à parte', () => {

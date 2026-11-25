@@ -101,9 +101,10 @@
           <div class="heroPill" id="kPill"></div>
           <div class="kBar" id="kBarWrap" hidden><div id="kBar"></div></div>
           <div class="heroSplit">
-            <div><small id="kFechadaLabel">Última fatura</small><strong class="money" id="kFechada">—</strong></div>
+            <div><small id="kFechadaLabel">Faturas fechadas</small><strong class="money" id="kFechada">—</strong></div>
             <div><small>Limite livre</small><strong class="money" id="kLivre">—</strong></div>
           </div>
+          <div class="kList" id="kList"></div>
           <div class="heroNote" id="kNote"></div>
         </article>
 
@@ -122,6 +123,7 @@
             <div><dt>&nbsp;&nbsp;na conta</dt><dd class="money" id="hSaidasConta">—</dd></div>
             <div><dt>&nbsp;&nbsp;no cartão</dt><dd class="money" id="hSaidasCartao">—</dd></div>
           </dl>
+          <p class="hint" id="neutrosNote" hidden></p>
           <p class="hint">Aqui cada compra conta na data em que foi feita. Pagar a fatura não entra, para não contar em dobro.</p>
         </article>
 
@@ -184,6 +186,7 @@
         <button type="button" class="on" data-v="">Tudo</button>
         <button type="button" data-v="conta">Conta</button>
         <button type="button" data-v="cartao">Cartão</button>
+        <button type="button" data-v="neutros">Não contam</button>
       </div>
       <p class="note viewNote" id="viewNote" hidden></p>
 
@@ -430,6 +433,7 @@
   <div class="group importOptions" id="importOptions" hidden>
     <label class="row"><span>É fatura de cartão de crédito</span><input type="checkbox" id="importCard"></label>
     <label class="row"><span>Inverter entradas e saídas</span><input type="checkbox" id="importInvert"></label>
+    <label class="row" id="importFaturaRow" hidden><span>Vencimento desta fatura</span><input type="month" id="importFaturaMes"></label>
   </div>
   <div class="previewScroll" id="importPreview"></div>
   <div class="alertActions"><button type="button" class="btn primary" id="btnConfirmImport">Salvar lançamentos</button><button type="button" class="btn soft" id="btnCancelImport">Cancelar</button></div>
