@@ -3,7 +3,7 @@
 const { fmt, pct, escapeHtml, pad2, todayISO, curMonth, shiftMonth, monthLabel, monthShort, normalizeImportText,
         parseImportNumber, parseImportDate, monthlyTotals, matchesSearch, backupStatus,
         dayLabel, groupByDay, categoryTotals, monthSummary, installmentSchedule, dataWarnings, recategorize,
-        applyCategoryToSimilar, isNeutral, parseInstallment, ruleKey, guessCategory, importSanity, accountBalance, cardSummary, fixInstallmentDates, suggestFatura, neutralSummary, NEUTRAL_CATEGORIES } = FinLib;
+        applyCategoryToSimilar, isNeutral, parseInstallment, ruleKey, guessCategory, importSanity, accountBalance, cardSummary, fixInstallmentDates, suggestFatura, neutralSummary, NEUTRAL_CATEGORIES, merchantKey, entitiesOf, belongsTo, entityConfig, accountsOverview, cardsOverview, defaultEntities } = FinLib;
 
 let transactions = [];
 let editingId = null;
@@ -32,6 +32,14 @@ const $ = id => document.getElementById(id);
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const sum = (list, fn) => list.reduce((total, item) => total + fn(item), 0);
 
+function ensureEntities(){
+  if(Array.isArray(config.contas) && config.contas.length) return;
+  const ents = defaultEntities(config);
+  const pagas = {};
+  Object.entries(config.faturasPagas||{}).forEach(([k,v])=>{ pagas[k.includes('|') ? k : 'cartao1|'+k] = v; });
+  config = {...config, contas: ents, faturasPagas: pagas};
+}
+
 function loadLocalState(){
   try{
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY)||'null');
@@ -42,6 +50,7 @@ function loadLocalState(){
     if(saved.rules && typeof saved.rules==='object') categoryRules = saved.rules;
     if(saved.tombstones && typeof saved.tombstones==='object') tombstones = saved.tombstones;
     if(saved.configUpdatedAt) configUpdatedAt = saved.configUpdatedAt;
+    ensureEntities();
   }catch(e){ console.warn('Não foi possível ler os dados locais', e); }
 }
 // Cada lançamento guarda u (quando mudou) e apagar deixa uma "lápide": é isso que permite mesclar dois aparelhos.
@@ -94,7 +103,7 @@ function closeOnBackdrop(dialog){
     if(e.clientX<r.left || e.clientX>r.right || e.clientY<r.top || e.clientY>r.bottom) dialog.close();
   });
 }
-[transactionModal, moreSheet, reservaModal, deleteModal, clearModal, restoreModal, syncSheet].forEach(closeOnBackdrop);
+[transactionModal, moreSheet, reservaModal, deleteModal, clearModal, restoreModal, syncSheet, outrosSheet].forEach(closeOnBackdrop);
 
 // ---- Navegação ----
 function goTab(name){
@@ -139,9 +148,26 @@ desc.addEventListener('input', ()=>{
   if(guess!=='Outros' && [...categoria.options].some(o=>o.value===guess)) categoria.value = guess;
 });
 
+// ---- Conta ou cartão do lançamento ----
+function fillContaSelect(conta, cartao){
+  const ents = entitiesOf(config), credit = forma.value==='Crédito';
+  const peers = ents.filter(e=>e.tipo===(credit ? 'cartao' : 'conta'));
+  rowConta.hidden = peers.length<2;
+  lbConta.textContent = credit ? 'Cartão' : 'Conta';
+  contaSel.innerHTML = peers.map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.nome)}</option>`).join('');
+  contaSel.value = peers.some(p=>p.id===conta) ? conta : peers[0].id;
+  const cards = ents.filter(e=>e.tipo==='cartao');
+  rowCartaoFatura.hidden = !(categoria.value==='Fatura paga' && cards.length>1);
+  cartaoSel.innerHTML = cards.map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.nome)}</option>`).join('');
+  cartaoSel.value = cards.some(c=>c.id===cartao) ? cartao : cards[0].id;
+}
+forma.addEventListener('change', ()=>fillContaSelect(contaSel.value, cartaoSel.value));
+categoria.addEventListener('change', ()=>fillContaSelect(contaSel.value, cartaoSel.value));
+
 function openForm(){
   editingId = null; categoriaTouched = false; form.reset(); setTipo('Saída'); categoria.value = DEFAULT_CAT['Saída']; pago.value = 'Sim'; data.value = todayISO();
   modalTitle.textContent = 'Novo lançamento'; btnSubmit.textContent = 'Salvar lançamento'; btnDeleteTx.hidden = true;
+  fillContaSelect();
   transactionModal.showModal();
   setTimeout(()=>valor.focus(), 60);
 }
@@ -158,7 +184,7 @@ function startEdit(id){
   categoria.value = t.categoria; desc.value = t.descricao;
   valor.value = t.valor; forma.value = t.forma; pago.value = t.pago;
   btnSubmit.textContent = 'Salvar alterações'; btnDeleteTx.hidden = false;
-  modalTitle.textContent = 'Editar lançamento'; transactionModal.showModal();
+  modalTitle.textContent = 'Editar lançamento'; fillContaSelect(t.conta, t.cartao); transactionModal.showModal();
 }
 btnDeleteTx.addEventListener('click', ()=>{
   if(!editingId) return;
@@ -189,9 +215,11 @@ form.addEventListener('submit', e=>{
   e.preventDefault();
   const d = desc.value.trim(); const v = parseFloat(valor.value);
   if(!d || isNaN(v)) return;
-  const payload = { descricao:d, valor:v, tipo:tipo.value, categoria:categoria.value, forma:forma.value,
-    pago:pago.value, data: data.value || todayISO() };
   const prev = editingId ? transactions.find(x=>x.id===editingId) : null;
+  const payload = { ...(prev||{}), descricao:d, valor:v, tipo:tipo.value, categoria:categoria.value, forma:forma.value,
+    pago:pago.value, data: data.value || todayISO() };
+  if(!rowConta.hidden) payload.conta = contaSel.value;
+  if(!rowCartaoFatura.hidden) payload.cartao = cartaoSel.value; else if(payload.categoria!=='Fatura paga') delete payload.cartao;
   if((prev && (prev.manual || prev.categoria!==payload.categoria)) || (!prev && categoriaTouched)) payload.manual = true; // categoria escolhida por você: o Reanalisar não mexe
   if(editingId){
     const old = transactions.find(x=>x.id===editingId);
@@ -235,23 +263,65 @@ btnUpdateReserva.addEventListener('click', ()=>{
 });
 
 // ---- Configurações (aba Planejar) ----
+// ---- Contas e cartões (Planejar) ----
+function renderContasSettings(){
+  const ents = entitiesOf(config);
+  contasList.innerHTML = ents.map(e=>{
+    const same = ents.filter(x=>x.tipo===e.tipo).length;
+    const id = escapeHtml(e.id);
+    const campos = e.tipo==='conta'
+      ? `<label class="row"><span>Saldo</span><i class="unit">R$</i><input type="number" step="any" inputmode="decimal" data-id="${id}" data-f="saldoInicial" value="${e.saldoInicial||''}"></label>`
+        + `<label class="row"><span>…no fim do dia</span><input type="date" data-id="${id}" data-f="saldoData" value="${escapeHtml(e.saldoData||'')}"></label>`
+      : `<label class="row"><span>Limite</span><i class="unit">R$</i><input type="number" step="any" inputmode="decimal" data-id="${id}" data-f="limite" value="${e.limite||''}"></label>`
+        + `<label class="row"><span>Fatura fecha no dia</span><input type="number" min="1" max="31" inputmode="numeric" data-id="${id}" data-f="fecha" value="${e.fecha||''}"></label>`
+        + `<label class="row"><span>Fatura vence no dia</span><input type="number" min="1" max="31" inputmode="numeric" data-id="${id}" data-f="vence" value="${e.vence||''}"></label>`;
+    return `<h4 class="groupTitle">${e.tipo==='conta'?'Conta':'Cartão'}</h4><div class="group">`
+      + `<label class="row"><span>Nome</span><input type="text" data-id="${id}" data-f="nome" value="${escapeHtml(e.nome)}" autocomplete="off"></label>${campos}`
+      + (same>1 ? `<button type="button" class="row action danger" data-del="${id}"><span>Remover ${escapeHtml(e.nome)}</span></button>` : '') + '</div>';
+  }).join('');
+}
+contasList.addEventListener('change', e=>{
+  const inp = e.target.closest('input[data-f]'); if(!inp) return;
+  const f = inp.dataset.f; let v = inp.value;
+  if(f==='nome'){ v = v.trim(); if(!v){ renderContasSettings(); return; } }
+  else if(f==='saldoData'){ v = v||''; }
+  else if(f==='fecha' || f==='vence'){ v = Math.min(Math.max(Math.round(parseFloat(v)||0),0),31); }
+  else v = parseFloat(v)||0;
+  config = {...config, contas: entitiesOf(config).map(x=>x.id===inp.dataset.id ? {...x, [f]:v} : x)};
+  saveLocalState(); render();
+});
+contasList.addEventListener('click', e=>{
+  const b = e.target.closest('button[data-del]'); if(!b) return;
+  const ent = entitiesOf(config).find(x=>x.id===b.dataset.del); if(!ent) return;
+  if(!window.confirm(`Remover "${ent.nome}"? Os lançamentos dela passam para a primeira ${ent.tipo==='cartao'?'cartão':'conta'} da lista.`)) return;
+  config = {...config, contas: entitiesOf(config).filter(x=>x.id!==ent.id)};
+  saveLocalState(); renderContasSettings(); render();
+});
+function addEntity(tipo){
+  const ents = entitiesOf(config);
+  const id = 'c_' + Math.random().toString(36).slice(2,8);
+  const n = ents.filter(x=>x.tipo===tipo).length + 1;
+  const nova = tipo==='conta' ? {id, nome:`Conta ${n}`, tipo, saldoInicial:0, saldoData:''} : {id, nome:`Cartão ${n}`, tipo, limite:0, fecha:0, vence:0};
+  config = {...config, contas:[...ents, nova]};
+  saveLocalState(); renderContasSettings(); render();
+}
+btnAddConta.addEventListener('click', ()=>addEntity('conta'));
+btnAddCartao.addEventListener('click', ()=>addEntity('cartao'));
+
 function fillCfgForm(){
   cfgSalario.value=config.salario; cfgDias.value=config.dias; cfgVr.value=config.vr; cfgVt.value=config.vt;
   cfgFaculdade.value=config.faculdade; cfgCelular.value=config.celular; cfgParcelasRestantes.value=config.parcelasRestantes;
   cfgCartao.value=config.cartao; cfgLazer.value=config.lazer; cfgInvestAlvo.value=config.investAlvo;
   cfgMetaReserva.value=config.metaReserva; cfgMetaPatrim.value=config.metaPatrim;
   cfgReservaAtual.value=config.reservaAtual; cfgPatrimAtual.value=config.patrimAtual;
-  cfgSaldoInicial.value=config.saldoInicial||''; cfgSaldoData.value=config.saldoData||''; cfgLimite.value=config.cartaoLimite||'';
-  cfgFecha.value=config.cartaoFecha||''; cfgVence.value=config.cartaoVence||'';
+  renderContasSettings();
 }
 btnSaveCfg.addEventListener('click', ()=>{
   const n = el => parseFloat(el.value)||0;
   config = {
     ...config, salario:n(cfgSalario), dias:n(cfgDias), vr:n(cfgVr), vt:n(cfgVt), faculdade:n(cfgFaculdade), celular:n(cfgCelular),
     parcelasRestantes:n(cfgParcelasRestantes), cartao:n(cfgCartao), lazer:n(cfgLazer), investAlvo:n(cfgInvestAlvo),
-    metaReserva:n(cfgMetaReserva), metaPatrim:n(cfgMetaPatrim), reservaAtual:n(cfgReservaAtual), patrimAtual:n(cfgPatrimAtual),
-    saldoInicial:n(cfgSaldoInicial), saldoData:cfgSaldoData.value||'', cartaoLimite:n(cfgLimite),
-    cartaoFecha:Math.min(Math.max(Math.round(n(cfgFecha)),0),31), cartaoVence:Math.min(Math.max(Math.round(n(cfgVence)),0),31)
+    metaReserva:n(cfgMetaReserva), metaPatrim:n(cfgMetaPatrim), reservaAtual:n(cfgReservaAtual), patrimAtual:n(cfgPatrimAtual)
   };
   saveLocalState(); render();
   showToast('Alterações salvas ✓');
@@ -271,25 +341,33 @@ function renderGeral(){
   const hoje = todayISO();
   const dd = iso => iso ? iso.slice(8,10)+'/'+iso.slice(5,7) : '';
 
-  // 1) Conta: só o dinheiro que está na conta
-  const acc = accountBalance(transactions, config, hoje);
-  cSaldo.textContent = acc.configurado ? fmt(acc.saldo) : '—';
-  cPill.textContent = acc.configurado ? '' : 'Informe o saldo atual em Planejar → Conta e cartão';
+  // 1) Contas: cada uma com o seu saldo (nunca somados)
+  const accs = accountsOverview(transactions, config, hoje);
+  const a0 = accs[0];
+  cLabel.textContent = accs.length>1 ? `Conta · ${a0.entity.nome}` : 'Conta';
+  cSaldo.textContent = a0.configurado ? fmt(a0.saldo) : '—';
+  cPill.textContent = a0.configurado ? '' : 'Informe o saldo atual em Planejar → Contas e cartões';
   cEntradas.textContent = fmt(S.entradas);
   cSaidas.textContent = fmt(S.saidas - S.noCartao);
-  cNote.textContent = S.faturasPagas ? `Pagou de fatura neste mês: ${fmt(S.faturasPagas)} (já contado nas compras do cartão)` : '';
+  cList.innerHTML = accs.slice(1).map(a=>`<div class="kRow"><span>${escapeHtml(a.entity.nome)}</span><b class="money">${a.configurado ? fmt(a.saldo) : '—'}</b></div>`).join('');
+  cNote.textContent = (accs.length>1 ? 'Entradas e saídas somam todas as contas. ' : '') + (S.faturasPagas ? `Pagou de fatura neste mês: ${fmt(S.faturasPagas)} (já contado nas compras do cartão)` : '');
 
-  // 2) Cartão: fatura aberta, faturas fechadas a pagar e limite
-  const card = cardSummary(transactions, config, hoje);
+  // 2) Cartões: fatura aberta, faturas fechadas a pagar e limite
+  const cards = cardsOverview(transactions, config, hoje);
+  const card = cards[0];
+  const varios = cards.length>1;
+  kLabel.textContent = varios ? `Cartão · ${card.entity.nome}` : 'Cartão';
   kAberta.textContent = fmt(card.aberta.total);
   kSub.textContent = card.configurado ? 'fatura aberta' : 'compras do mês';
   kPill.textContent = card.configurado ? `Fecha ${dd(card.aberta.end)}${card.aberta.due ? ' · vence '+dd(card.aberta.due) : ''}` : 'Informe fechamento e vencimento em Planejar';
   kBarWrap.hidden = !(card.limite>0);
   if(card.limite>0){ const r = card.usado/card.limite; kBar.style.width = Math.min(Math.max(r,0),1)*100+'%'; kBar.className = r>=1 ? 'over' : r>=.8 ? 'warn' : ''; }
-  kFechadaLabel.textContent = card.pendentes.length ? `A pagar (${card.pendentes.length} fatura${card.pendentes.length===1?'':'s'})` : 'Faturas fechadas';
-  kFechada.textContent = card.pendentes.length ? fmt(card.aPagar) : 'nada a pagar';
-  kList.innerHTML = card.pendentes.map(i=>
-    `<div class="kRow"><span>Vence ${dd(i.due)||i.key}${i.status==='vencida'?' · vencida':''}${i.pago>0?' · pago '+fmt(i.pago):''}</span><b class="money">${fmt(i.faltam)}</b><button type="button" data-paga="${escapeHtml(i.key)}">Já paguei</button></div>`).join('');
+  const pend = cards.flatMap(c=>c.pendentes.map(i=>({c,i})));
+  kFechadaLabel.textContent = pend.length ? `A pagar (${pend.length} fatura${pend.length===1?'':'s'})` : 'Faturas fechadas';
+  kFechada.textContent = pend.length ? fmt(sum(pend, p=>p.i.faltam)) : 'nada a pagar';
+  kList.innerHTML = pend.map(({c,i})=>
+    `<div class="kRow"><span>${varios ? escapeHtml(c.entity.nome)+' · ' : ''}Vence ${dd(i.due)||i.key}${i.status==='vencida'?' · vencida':''}${i.pago>0?' · pago '+fmt(i.pago):''}</span><b class="money">${fmt(i.faltam)}</b><button type="button" data-paga="${escapeHtml(c.entity.id+'|'+i.key)}">Já paguei</button></div>`).join('')
+    + cards.slice(1).map(c=>`<div class="kRow"><span>${escapeHtml(c.entity.nome)} · aberta${c.aberta.due ? ' · vence '+dd(c.aberta.due) : ''}${c.limite>0 ? ' · livre '+fmt(Math.max(c.livre,0)) : ''}</span><b class="money">${fmt(c.aberta.total)}</b></div>`).join('');
   kLivre.textContent = card.limite>0 ? fmt(Math.max(card.livre,0)) : '—';
   kNote.textContent = card.limite>0 ? `${fmt(card.usado)} do limite de ${fmt(card.limite)} em uso: fatura aberta + faturas a pagar + ${fmt(card.parcelas)} em parcelas que ainda vão vir` : '';
 
@@ -401,6 +479,10 @@ function populateFilters(){
   const curMes = fMes.value;
   fMes.innerHTML = '<option value="">Todos os meses</option>' + months.map(m=>`<option value="${escapeHtml(m)}">${escapeHtml(cap(monthShort(m))+' '+m.slice(0,4))}</option>`).join('');
   if(months.includes(curMes)) fMes.value = curMes;
+  const ents = entitiesOf(config), curConta = fConta.value;
+  fConta.hidden = ents.length<=2;
+  fConta.innerHTML = '<option value="">Todas as contas</option>' + ents.map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.nome)}</option>`).join('');
+  if(ents.some(e=>e.id===curConta)) fConta.value = curConta;
   const cats = [...new Set(transactions.map(t=>t.categoria).filter(Boolean))].sort();
   const curCat = fCategoria.value;
   fCategoria.innerHTML = '<option value="">Todas categorias</option>' + cats.map(c=>`<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
@@ -411,6 +493,7 @@ function filteredList(){
     (!fMes.value || (t.data||'').startsWith(fMes.value)) &&
     (!fCategoria.value || t.categoria===fCategoria.value) &&
     (!tipoFilter || t.tipo===tipoFilter) &&
+    (!fConta.value || belongsTo(t, entitiesOf(config).find(e=>e.id===fConta.value) || {tipo:'conta',id:''}, entitiesOf(config))) &&
     (!viewFilter || (viewFilter==='neutros' ? isNeutral(t) : viewFilter==='cartao' ? t.forma==='Crédito' : t.forma!=='Crédito')) &&
     matchesSearch(t, fBusca.value)
   );
@@ -431,10 +514,10 @@ function setTipoFilter(value){
   tipoChips.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.tipo===value));
 }
 tipoChips.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{ setTipoFilter(b.dataset.tipo); render(); }));
-[fMes,fCategoria].forEach(el=>el.addEventListener('change', render));
+[fMes,fCategoria,fConta].forEach(el=>el.addEventListener('change', render));
 fBusca.addEventListener('input', render);
 quickClearFilters.addEventListener('click', ()=>{
-  fMes.value = selectedMonth; fCategoria.value = ''; fBusca.value = ''; setTipoFilter(''); render();
+  fMes.value = selectedMonth; fCategoria.value = ''; fConta.value = ''; fBusca.value = ''; setTipoFilter(''); render();
 });
 
 function renderLancamentos(){
@@ -463,7 +546,7 @@ function renderLancamentos(){
     + `<div class="txGroup">${day.items.map(txItem).join('')}</div></section>`
   ).join('');
   emptyMsg.hidden = filtered.length>0;
-  quickClearFilters.hidden = !(fCategoria.value || tipoFilter || fBusca.value || fMes.value!==selectedMonth);
+  quickClearFilters.hidden = !(fCategoria.value || fConta.value || tipoFilter || fBusca.value || fMes.value!==selectedMonth);
 }
 
 // ---- Planejar: orçamento restante ----
@@ -528,7 +611,7 @@ function renderInsights(){
   const warns = dataWarnings(transactions, selectedMonth);
   insightsPanel.hidden = !warns.length;
   insightList.innerHTML = warns.map(w=>{
-    const label = w.fix==='fatura-paga' || w.fix==='parcelas-datas' ? 'Corrigir' : w.fix==='reanalisar' ? 'Reanalisar' : '';
+    const label = w.fix==='fatura-paga' || w.fix==='parcelas-datas' ? 'Corrigir' : w.fix==='reanalisar' ? 'Reanalisar' : w.fix==='classificar' ? 'Classificar' : '';
     return `<div class="insight ${w.level}"><span>${escapeHtml(w.text)}</span>`
       + (label ? `<button type="button" data-fix="${w.fix}" data-ids="${escapeHtml((w.fixIds||[]).join(','))}">${label}</button>` : '') + '</div>';
   }).join('');
@@ -543,7 +626,8 @@ insightList.addEventListener('click', e=>{
     const r = fixInstallmentDates(transactions);
     transactions = r.transactions; saveLocalState(); render();
     showToast(`${r.changed} parcela(s) levada(s) para a data da fatura ✓`, 3500);
-  }else if(b.dataset.fix==='reanalisar') reanalisar();
+  }else if(b.dataset.fix==='classificar') openOutros();
+  else if(b.dataset.fix==='reanalisar') reanalisar();
 });
 function reanalisar(){
   const r = recategorize(transactions, categoryRules);
@@ -560,6 +644,46 @@ function reanalisar(){
   showToast(`${r.changed} lançamento(s) reclassificado(s) ✓`, 3200);
 }
 btnReanalisar.addEventListener('click', ()=>{ moreSheet.close(); reanalisar(); });
+
+// ---- Classificar o que está em "Outros": agrupa por estabelecimento, você escolhe a categoria uma vez ----
+const CAT_SAIDA = ['Alimentação','Transporte','Moradia','Saúde','Compras','Lazer','Faculdade','Celular','Taxas e impostos','Transferências','Investimentos','Reserva','Fatura paga','Transferência própria','Outros'];
+const CAT_ENTRADA = ['Salário','VR','VT','Rendimentos','Transferências','Resgate','Transferência própria','Outros'];
+function outrosGroups(){
+  const map = new Map();
+  for(const t of transactions){
+    if(isNeutral(t) || (t.categoria && t.categoria!=='Outros')) continue;
+    const k = t.tipo + ':' + (merchantKey(t.descricao) || String(t.descricao||'').toLowerCase());
+    const g = map.get(k) || {key:k, tipo:t.tipo, desc:t.descricao||'(sem descrição)', ids:[], total:0};
+    g.ids.push(t.id); g.total += Number(t.valor)||0; map.set(k, g);
+  }
+  return [...map.values()].sort((a,b)=>b.total-a.total).slice(0,40);
+}
+let outrosCache = [];
+function renderOutros(){
+  outrosCache = outrosGroups();
+  const total = sum(outrosCache, g=>g.total);
+  outrosInfo.textContent = outrosCache.length
+    ? `${outrosCache.length} grupo(s), ${fmt(total)} no total. Escolha a categoria de cada um: vale para todos os lançamentos parecidos, agora e nas próximas importações.`
+    : 'Nada em "Outros". Tudo classificado 🎉';
+  outrosList.innerHTML = outrosCache.map((g,i)=>{
+    const opts = (g.tipo==='Entrada' ? CAT_ENTRADA : CAT_SAIDA).map(c=>`<option${c==='Outros'?' selected':''}>${escapeHtml(c)}</option>`).join('');
+    return `<div class="outRow"><div class="outInfo"><b>${escapeHtml(g.desc)}</b><small>${g.ids.length}× · ${g.tipo==='Entrada'?'entrada':'saída'} · <span class="money">${fmt(g.total)}</span></small></div><select data-i="${i}" aria-label="Categoria de ${escapeHtml(g.desc)}">${opts}</select></div>`;
+  }).join('');
+}
+function openOutros(){ moreSheet.close(); renderOutros(); outrosSheet.showModal(); }
+outrosList.addEventListener('change', e=>{
+  const sel = e.target.closest('select[data-i]'); if(!sel) return;
+  const g = outrosCache[Number(sel.dataset.i)]; const categoria = sel.value;
+  if(!g || categoria==='Outros') return;
+  const ids = new Set(g.ids);
+  transactions = transactions.map(t=>ids.has(t.id) ? {...t, categoria, manual:true} : t);
+  const key = ruleKey(g.desc, g.tipo);
+  if(key.length>8) categoryRules = {...categoryRules, [key]:categoria};
+  saveLocalState(); render(); renderOutros();
+  showToast(`${g.ids.length} lançamento(s) → ${categoria} ✓`);
+});
+btnOutros.addEventListener('click', openOutros);
+btnCloseOutros.addEventListener('click', ()=>outrosSheet.close());
 
 // ---- Parcelas já lançadas que ainda vão vencer ----
 function renderParcelas(){
@@ -771,6 +895,23 @@ function readXlsx(buf){
   return items;
 }
 
+// ---- Importação: para qual conta ou cartão vai ----
+function fillImportConta(){
+  const ents = entitiesOf(config);
+  importContaRow.hidden = ents.length<=2;
+  importConta.innerHTML = ents.map(e=>`<option value="${escapeHtml(e.id)}">${escapeHtml(e.nome)} (${e.tipo==='cartao'?'cartão':'conta'})</option>`).join('');
+  const first = ents.find(e=>e.tipo===(importCard.checked ? 'cartao' : 'conta'));
+  importConta.value = first.id;
+}
+function importEntity(){
+  const ents = entitiesOf(config);
+  return ents.find(e=>e.id===importConta.value) || ents.find(e=>e.tipo===(importCard.checked ? 'cartao' : 'conta'));
+}
+importCard.addEventListener('change', ()=>{ fillImportConta(); importFaturaMes.value = ''; });
+importConta.addEventListener('change', ()=>{
+  const ent = importEntity(); importCard.checked = ent.tipo==='cartao'; importFaturaMes.value = ''; renderImportPreview();
+});
+
 function buildImportList(){
   if(!importSource) return [];
   const list = importSource.kind==='xlsx' ? importSource.items
@@ -780,10 +921,12 @@ function buildImportList(){
   importFaturaRow.hidden = !card;
   let tagged = list;
   if(card){
-    if(!importFaturaMes.value){ const sug = suggestFatura(list, config); if(sug) importFaturaMes.value = sug; }
+    const ents = entitiesOf(config), ent = importEntity();
+    if(!importFaturaMes.value){ const sug = suggestFatura(list, entityConfig(ent, config, ents)); if(sug) importFaturaMes.value = sug; }
     const tag = importFaturaMes.value;
     if(tag) tagged = list.map(t=>({...t, fatura:tag}));
   }
+  if(importSource.kind==='bank' && !importContaRow.hidden){ const ent = importEntity(); tagged = tagged.map(t=>({...t, conta:ent.id})); }
   return markDuplicates(transactions, tagged);
 }
 function renderImportPreview(){
@@ -840,7 +983,7 @@ fileInput.addEventListener('change', async e=>{
       importSource = {kind:'bank', parsed, pdf:true};
       importCard.checked = Boolean(parsed.cardHint);
       importInvert.checked = Boolean(parsed.invertHint);
-      importOptions.hidden = false; importFaturaMes.value = '';
+      importOptions.hidden = false; importFaturaMes.value = ''; fillImportConta();
       renderImportPreview();
       importModal.showModal();
       return;
@@ -855,7 +998,7 @@ fileInput.addEventListener('change', async e=>{
       importSource = {kind:'bank', parsed};
       importCard.checked = Boolean(parsed.cardHint);
       importInvert.checked = Boolean(parsed.invertHint);
-      importOptions.hidden = false; importFaturaMes.value = '';
+      importOptions.hidden = false; importFaturaMes.value = ''; fillImportConta();
     }
     renderImportPreview();
     importModal.showModal();
@@ -948,7 +1091,7 @@ btnIosHintClose.addEventListener('click', ()=>{
 // ---- Render geral ----
 
 // ---- Sincronização entre aparelhos (criptografada; veja docs/sincronizacao.md) ----
-const APP_VERSION = 'v20'; // igual ao cache do sw.js
+const APP_VERSION = 'v21'; // igual ao cache do sw.js
 const SYNC_KEY = 'meu-financeiro-sync';
 let syncCfg = null, syncTimer = null, syncBusy = false, syncMsg = {text:'', err:false};
 function loadSyncCfg(){ try{ syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)||'null'); }catch(e){ syncCfg = null; } }
@@ -978,7 +1121,7 @@ function getSyncState(){ return {transactions, tombstones, config, configUpdated
 async function applyMerged(merged){
   const m = FinSync.mergeStates(getSyncState(), merged); // reaplica o que você mexeu durante o envio
   transactions = [...transactions.filter(t=>String(t.id).startsWith('demo_')), ...m.transactions];
-  tombstones = m.tombstones; config = {...DEFAULT_CONFIG, ...m.config}; configUpdatedAt = m.configUpdatedAt; categoryRules = m.rules;
+  tombstones = m.tombstones; config = {...DEFAULT_CONFIG, ...m.config}; ensureEntities(); configUpdatedAt = m.configUpdatedAt; categoryRules = m.rules;
   resetSnapshots(); persistRaw(); fillCfgForm(); render();
 }
 async function runSync(){

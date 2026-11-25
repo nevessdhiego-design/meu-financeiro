@@ -386,3 +386,14 @@ body.privacy .money,body.privacy .evoSvg,body.privacy .spark,body.privacy .stack
 .kRow b{font-weight:700;}
 .kRow button{flex:none;padding:4px 10px;border-radius:999px;background:#fff;color:#111;font-size:.74rem;font-weight:700;}
 #neutrosNote button{color:var(--brand);font-weight:700;text-decoration:underline;padding:0 2px;}
+
+.outRow{display:flex;align-items:center;gap:10px;padding:12px 4px;border-top:1px solid var(--line);}
+.outRow .outInfo{flex:1;min-width:0;}
+.outRow .outInfo b{display:block;font-size:.9rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.outRow .outInfo small{color:var(--muted);font-size:.76rem;}
+.outRow select{flex:0 0 150px;max-width:46%;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--text);font:inherit;font-size:16px;}
+
+.addRow{display:flex;gap:10px;margin:10px 0 4px;}
+.addRow .btn{flex:1;}
+#contasList .groupTitle{margin-top:14px;}
+.filterRow select[hidden]{display:none;}

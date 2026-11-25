@@ -453,3 +453,50 @@ test('parcelas com a data da compra original vão para a data da fatura (na impo
   assert.deepEqual(r.transactions.map((x) => x.data), ['2026-11-04', '2026-11-04', '2026-07-15']);
   assert.ok(lib.dataWarnings(antigo, '2026-11').some((w) => w.id === 'parcelas-datas'));
 });
+
+test('várias contas e cartões: cada lançamento vai para a sua conta, sem conta cai na primeira', () => {
+  const config = { contas: [
+    { id: 'c1', nome: 'Nubank', tipo: 'conta', saldoInicial: 1000, saldoData: '2026-11-01' },
+    { id: 'c2', nome: 'Inter', tipo: 'conta', saldoInicial: 500, saldoData: '2026-11-01' },
+    { id: 'k1', nome: 'Nubank Roxo', tipo: 'cartao', limite: 2000, fecha: 5, vence: 12 },
+    { id: 'k2', nome: 'Inter Gold', tipo: 'cartao', limite: 1000, fecha: 20, vence: 27 },
+  ] };
+  const t = [
+    { id: 'a', data: '2026-11-05', valor: 100, tipo: 'Saída', forma: 'Pix', conta: 'c1' },
+    { id: 'b', data: '2026-11-06', valor: 40, tipo: 'Saída', forma: 'Débito', conta: 'c2' },
+    { id: 'c', data: '2026-11-07', valor: 30, tipo: 'Saída', forma: 'Pix' }, // sem conta: primeira conta
+    { id: 'd', data: '2026-11-08', valor: 25, tipo: 'Saída', forma: 'Pix', conta: 'sumiu' }, // conta que não existe mais: primeira
+    { id: 'e', data: '2026-11-08', valor: 300, tipo: 'Saída', forma: 'Crédito', conta: 'k2' },
+    { id: 'f', data: '2026-11-09', valor: 80, tipo: 'Saída', forma: 'Crédito' }, // primeiro cartão
+  ];
+  const accs = lib.accountsOverview(t, config, '2026-11-20');
+  assert.deepEqual(accs.map((a) => [a.entity.nome, a.saldo]), [['Nubank', 1000 - 100 - 30 - 25], ['Inter', 500 - 40]]);
+  const cards = lib.cardsOverview(t, config, '2026-11-15');
+  assert.deepEqual(cards.map((c) => [c.entity.nome, c.aberta.total]), [['Nubank Roxo', 80], ['Inter Gold', 300]]);
+  assert.equal(cards[1].aberta.end, '2026-11-20'); // este cartão fecha dia 20
+});
+
+test('várias contas e cartões: configuração antiga vira conta e cartão principais; pago antigo vale para o primeiro cartão', () => {
+  const antiga = { saldoInicial: 700, saldoData: '2026-11-01', cartaoLimite: 3000, cartaoFecha: 5, cartaoVence: 12, faturasPagas: { '2026-11': true } };
+  const ents = lib.entitiesOf(antiga);
+  assert.deepEqual(ents.map((e) => [e.id, e.tipo]), [['conta1', 'conta'], ['cartao1', 'cartao']]);
+  assert.equal(lib.entityConfig(ents[1], antiga, ents).faturasPagas['2026-11'], true);
+  const nova = { contas: [...ents, { id: 'k2', nome: 'Outro', tipo: 'cartao', limite: 0, fecha: 1, vence: 8 }], faturasPagas: { 'cartao1|2026-11': true, 'k2|2026-12': true } };
+  const e2 = lib.entitiesOf(nova);
+  assert.deepEqual(Object.keys(lib.entityConfig(e2[1], nova, e2).faturasPagas), ['2026-11']);
+  assert.deepEqual(Object.keys(lib.entityConfig(e2[2], nova, e2).faturasPagas), ['2026-12']);
+});
+
+test('com mais de um cartão, pagamento de fatura só abate a fatura se disser de qual cartão', () => {
+  const config = { contas: [
+    { id: 'k1', nome: 'A', tipo: 'cartao', limite: 0, fecha: 5, vence: 12 },
+    { id: 'k2', nome: 'B', tipo: 'cartao', limite: 0, fecha: 5, vence: 12 },
+  ] };
+  const t = [
+    { id: 'a', data: '2026-10-10', valor: 500, tipo: 'Saída', forma: 'Crédito', conta: 'k1' },
+    { id: 'b', data: '2026-10-10', valor: 500, tipo: 'Saída', forma: 'Crédito', conta: 'k2' },
+    { id: 'p', data: '2026-11-10', valor: 500, tipo: 'Saída', forma: 'Pix', categoria: 'Fatura paga', cartao: 'k2' },
+  ];
+  const [k1, k2] = lib.cardsOverview(t, config, '2026-11-15');
+  assert.deepEqual([k1.pendentes.length, k2.pendentes.length], [1, 0]);
+});

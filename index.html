@@ -85,18 +85,19 @@
 
       <div class="homeGrid">
         <article class="hero conta" aria-label="Conta">
-          <div class="heroLabel">Conta <span class="heroSub">saldo de hoje</span></div>
+          <div class="heroLabel"><span id="cLabel">Conta</span> <span class="heroSub">saldo de hoje</span></div>
           <div class="heroValue money" id="cSaldo">R$ 0,00</div>
           <div class="heroPill" id="cPill"></div>
           <div class="heroSplit">
             <div><span class="dot in"></span><small>Entradas no mês</small><strong class="money" id="cEntradas">R$ 0,00</strong></div>
             <div><span class="dot out"></span><small>Saídas da conta</small><strong class="money" id="cSaidas">R$ 0,00</strong></div>
           </div>
+          <div class="kList" id="cList"></div>
           <div class="heroNote" id="cNote"></div>
         </article>
 
         <article class="hero cartao" aria-label="Cartão de crédito">
-          <div class="heroLabel">Cartão <span class="heroSub" id="kSub">fatura aberta</span></div>
+          <div class="heroLabel"><span id="kLabel">Cartão</span> <span class="heroSub" id="kSub">fatura aberta</span></div>
           <div class="heroValue money" id="kAberta">R$ 0,00</div>
           <div class="heroPill" id="kPill"></div>
           <div class="kBar" id="kBarWrap" hidden><div id="kBar"></div></div>
@@ -199,6 +200,7 @@
       <div class="filterRow">
         <select id="fMes" aria-label="Mês"></select>
         <select id="fCategoria" aria-label="Categoria"><option value="">Todas categorias</option></select>
+        <select id="fConta" aria-label="Conta ou cartão" hidden></select>
         <button type="button" class="linkBtn" id="quickClearFilters" hidden>Limpar</button>
       </div>
 
@@ -223,15 +225,13 @@
         <div id="budgetChart"></div>
       </article>
 
-      <h4 class="groupTitle">Conta e cartão (para os saldos do Início)</h4>
-      <div class="group">
-        <label class="row"><span>Saldo da conta</span><i class="unit">R$</i><input type="number" id="cfgSaldoInicial" inputmode="decimal" step="any"></label>
-        <label class="row"><span>…no fim do dia</span><input type="date" id="cfgSaldoData"></label>
-        <label class="row"><span>Limite do cartão</span><i class="unit">R$</i><input type="number" id="cfgLimite" inputmode="decimal" step="any"></label>
-        <label class="row"><span>Fatura fecha no dia</span><input type="number" id="cfgFecha" inputmode="numeric" min="1" max="31"></label>
-        <label class="row"><span>Fatura vence no dia</span><input type="number" id="cfgVence" inputmode="numeric" min="1" max="31"></label>
+      <h4 class="groupTitle groupMain">Contas e cartões</h4>
+      <p class="note">Cada conta e cada cartão tem o seu saldo e nunca são somados. Em cada conta, informe o saldo de hoje e a data de hoje: o app soma só o que acontecer depois. Compras no crédito não mexem na conta; só o pagamento da fatura.</p>
+      <div id="contasList"></div>
+      <div class="addRow">
+        <button type="button" class="btn soft" id="btnAddConta">+ Conta</button>
+        <button type="button" class="btn soft" id="btnAddCartao">+ Cartão</button>
       </div>
-      <p class="note">Informe o saldo que está na conta e a data de hoje: o app soma só o que acontecer depois. Compras no crédito não mexem na conta; só o pagamento da fatura.</p>
 
       <h4 class="groupTitle">Metas por categoria</h4>
       <div class="group" id="metasGroup">
@@ -302,6 +302,8 @@
       <label class="row"><span>Pagamento</span>
         <select id="forma"><option>Débito</option><option>Crédito</option><option>Pix</option><option>Dinheiro</option><option>Benefício</option><option>Outro</option></select>
       </label>
+      <label class="row" id="rowConta" hidden><span id="lbConta">Conta</span><select id="contaSel"></select></label>
+      <label class="row" id="rowCartaoFatura" hidden><span>Fatura de qual cartão</span><select id="cartaoSel"></select></label>
       <label class="row"><span>Já foi pago?</span><select id="pago"><option>Sim</option><option>Não</option></select></label>
     </div>
     <button type="submit" class="btn primary" id="btnSubmit">Salvar lançamento</button>
@@ -319,6 +321,7 @@
     <button type="button" class="row action" id="btnRestoreJson"><svg class="ic"><use href="#i-restore"/></svg><span>Restaurar backup<small>Lê um arquivo JSON e mostra a prévia</small></span></button>
     <button type="button" class="row action" id="btnSync"><svg class="ic"><use href="#i-restore"/></svg><span>Sincronizar entre aparelhos<small id="syncSub">Notebook e celular, com criptografia</small></span></button>
     <button type="button" class="row action" id="btnImport"><svg class="ic"><use href="#i-download"/></svg><span>Importar extrato ou planilha<small>.ofx ou .csv do banco, ou .xlsx</small></span></button>
+    <button type="button" class="row action" id="btnOutros"><svg class="ic"><use href="#i-flask"/></svg><span>Classificar o que está em "Outros"<small>Agrupa por estabelecimento: você escolhe a categoria uma vez</small></span></button>
     <button type="button" class="row action" id="btnReanalisar"><svg class="ic"><use href="#i-flask"/></svg><span>Reanalisar categorias<small>Reclassifica os lançamentos em "Outros" com o que o app já sabe</small></span></button>
     <button type="button" class="row action" id="btnExport"><svg class="ic"><use href="#i-upload"/></svg><span>Exportar planilha<small>Todos os lançamentos em .xlsx</small></span></button>
   </div>
@@ -336,6 +339,14 @@
     <button type="button" class="row action danger" id="btnClearData"><svg class="ic"><use href="#i-trash"/></svg><span>Limpar lançamentos<small>Mantém configurações e metas</small></span></button>
   </div>
   <p class="note">Nada sai do aparelho: sem conta, sem servidor e sem rastreamento.</p>
+</dialog>
+
+<!-- Classificar "Outros" -->
+<dialog id="outrosSheet" class="sheet" aria-labelledby="outrosTitle">
+  <div class="grab" aria-hidden="true"></div>
+  <div class="sheetHead"><span class="spacer"></span><strong id="outrosTitle">Classificar "Outros"</strong><button type="button" class="linkBtn" id="btnCloseOutros">Fechar</button></div>
+  <p class="note" id="outrosInfo"></p>
+  <div id="outrosList"></div>
 </dialog>
 
 <!-- Sincronização -->
@@ -433,6 +444,7 @@
   <div class="group importOptions" id="importOptions" hidden>
     <label class="row"><span>É fatura de cartão de crédito</span><input type="checkbox" id="importCard"></label>
     <label class="row"><span>Inverter entradas e saídas</span><input type="checkbox" id="importInvert"></label>
+    <label class="row" id="importContaRow" hidden><span>Conta ou cartão</span><select id="importConta"></select></label>
     <label class="row" id="importFaturaRow" hidden><span>Vencimento desta fatura</span><input type="month" id="importFaturaMes"></label>
   </div>
   <div class="previewScroll" id="importPreview"></div>

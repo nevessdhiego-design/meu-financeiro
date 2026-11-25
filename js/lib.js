@@ -695,7 +695,7 @@
     return anchor ? faturaKey({ data: anchor }, config) : '';
   }
 
-  function cardSummary(transactions, config, refISO) {
+  function cardSummary(transactions, config, refISO, payments) {
     const [fecha, vence] = cardDays(config);
     const limite = Number(config.cartaoLimite) || 0;
     const configurado = fecha >= 1 && fecha <= 31;
@@ -711,7 +711,7 @@
     const refKey = faturaOf({ data: refISO }, fecha, vence);
     touch(refKey); // a fatura aberta existe mesmo sem compras
     const invoices = [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
-    const pays = transactions.filter((t) => t.categoria === 'Fatura paga' && t.tipo === 'Saída' && t.pago !== 'Não' && t.data)
+    const pays = (payments || transactions).filter((t) => t.categoria === 'Fatura paga' && t.tipo === 'Saída' && t.pago !== 'Não' && t.data)
       .map((t) => ({ data: t.data, left: Number(t.valor) || 0 })).sort((a, b) => a.data.localeCompare(b.data));
     for (const inv of invoices) {
       const [y, m] = inv.key.split('-').map(Number);
@@ -742,6 +742,53 @@
     const parcelas = installmentSchedule(transactions, shiftMonth((aberta.end || refISO).slice(0, 7), -1), 6, true);
     const usado = limite > 0 ? aberta.total + pendentes.reduce((s, i) => s + i.faltam, 0) + parcelas.total : 0;
     return { configurado, invoices, aberta, pendentes, aPagar: pendentes.reduce((s, i) => s + i.faltam, 0), limite, usado, livre: limite > 0 ? limite - usado : 0, parcelas: parcelas.total };
+  }
+
+  // ---- Várias contas e cartões, cada um com o seu saldo ----
+  // config.contas = [{ id, nome, tipo: 'conta', saldoInicial, saldoData } | { id, nome, tipo: 'cartao', limite, fecha, vence }].
+  // Lançamento sem "conta" (ou com uma que não existe mais) vai para a primeira conta (ou o primeiro cartão, se for crédito).
+  function defaultEntities(config) {
+    const c = config || {};
+    return [
+      { id: 'conta1', nome: 'Conta', tipo: 'conta', saldoInicial: Number(c.saldoInicial) || 0, saldoData: c.saldoData || '' },
+      { id: 'cartao1', nome: 'Cartão', tipo: 'cartao', limite: Number(c.cartaoLimite) || 0, fecha: Math.round(Number(c.cartaoFecha)) || 0, vence: Math.round(Number(c.cartaoVence)) || 0 },
+    ];
+  }
+  function entitiesOf(config) {
+    const list = Array.isArray(config.contas) ? config.contas.filter((e) => e && e.id && (e.tipo === 'conta' || e.tipo === 'cartao')) : [];
+    const def = defaultEntities(config);
+    if (!list.some((e) => e.tipo === 'conta')) list.unshift(def[0]);
+    if (!list.some((e) => e.tipo === 'cartao')) list.push(def[1]);
+    return list;
+  }
+  function belongsTo(t, entity, entities) {
+    const credit = t.forma === 'Crédito';
+    if ((entity.tipo === 'cartao') !== credit) return false;
+    const peers = entities.filter((e) => e.tipo === entity.tipo);
+    return (peers.some((e) => e.id === t.conta) ? t.conta : peers[0].id) === entity.id;
+  }
+  function entityConfig(entity, config, entities) {
+    if (entity.tipo === 'conta') return { saldoInicial: entity.saldoInicial, saldoData: entity.saldoData };
+    const first = entities.find((e) => e.tipo === 'cartao');
+    const pagas = {};
+    for (const [k, v] of Object.entries(config.faturasPagas || {})) {
+      if (k.includes('|')) { const [id, key] = k.split('|'); if (id === entity.id) pagas[key] = v; }
+      else if (first && first.id === entity.id) pagas[k] = v; // chave antiga (um cartão só) vale para o primeiro
+    }
+    return { cartaoLimite: entity.limite, cartaoFecha: entity.fecha, cartaoVence: entity.vence, faturasPagas: pagas };
+  }
+  function accountsOverview(transactions, config, refISO) {
+    const ents = entitiesOf(config);
+    return ents.filter((e) => e.tipo === 'conta').map((entity) => ({ entity, ...accountBalance(transactions.filter((t) => belongsTo(t, entity, ents)), entityConfig(entity, config, ents), refISO) }));
+  }
+  // Pagamento de fatura só abate sozinho a fatura de um cartão se houver um cartão só ou se o lançamento disser qual (cartao).
+  function cardsOverview(transactions, config, refISO) {
+    const ents = entitiesOf(config), cards = ents.filter((e) => e.tipo === 'cartao');
+    return cards.map((entity) => {
+      const own = transactions.filter((t) => belongsTo(t, entity, ents));
+      const pays = transactions.filter((t) => t.categoria === 'Fatura paga' && (t.cartao ? t.cartao === entity.id : cards.length === 1));
+      return { entity, ...cardSummary(own, entityConfig(entity, config, ents), refISO, pays) };
+    });
   }
 
   // O que NÃO conta como ganho nem gasto no mês (fatura paga, transferência própria, resgate): para mostrar e conferir.
@@ -809,7 +856,7 @@
         text: `${fixable.changed} parcela(s) do cartão estão com a data da compra original (meses atrás) e por isso não entram na fatura certa nem no limite. Corrigir leva cada uma para a data da fatura em que veio.` });
     }
     if (s.saidas > 0 && s.outros / s.saidas > 0.25) {
-      out.push({ id: 'muito-outros', level: 'info', fix: 'reanalisar',
+      out.push({ id: 'muito-outros', level: 'info', fix: 'classificar',
         text: `${Math.round((s.outros / s.saidas) * 100)}% das saídas estão em "Outros" (${fmt(s.outros)}). Reanalisar as categorias ou corrigir um lançamento ensina o app.` });
     }
     if (s.entradas > 0 && s.saidas > s.entradas) {
@@ -859,6 +906,6 @@
     decodeBytes, parseBankDate, parseMoney, parseCSV, parseBankCSV, parseOFX,
     pdfItemsToLines, parsePdfStatement, guessCategory, guessForma, bankTransactions, markDuplicates,
     NEUTRAL_CATEGORIES, isNeutral, parseInstallment, merchantKey, ruleKey, markInternalTransfers, importSanity,
-    monthSummary, accountBalance, invoiceCycle, cardSummary, faturaKey, suggestFatura, neutralSummary, fixInstallmentDates, installmentSchedule, dataWarnings, recategorize, applyCategoryToSimilar,
+    monthSummary, accountBalance, invoiceCycle, cardSummary, defaultEntities, entitiesOf, belongsTo, entityConfig, accountsOverview, cardsOverview, faturaKey, suggestFatura, neutralSummary, fixInstallmentDates, installmentSchedule, dataWarnings, recategorize, applyCategoryToSimilar,
   };
 });
