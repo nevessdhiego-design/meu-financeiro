@@ -19,9 +19,21 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script>try{var th=localStorage.getItem('meu-financeiro-theme');if(th==='light'||th==='dark')document.documentElement.dataset.theme=th;}catch(e){}</script>
+<script>/* tela de carregamento: uma vez por sessão; não aparece com movimento reduzido nem com ?semsplash */
+try{if(window.matchMedia('(prefers-reduced-motion: reduce)').matches||sessionStorage.getItem('meu-financeiro-splash')==='1'||/[?&]semsplash\b/.test(location.search))document.documentElement.classList.add('splash-skip');else sessionStorage.setItem('meu-financeiro-splash','1');}catch(e){}</script>
 <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
+
+<div class="splash" id="splash" role="status" aria-label="Carregando o Meu Financeiro">
+  <div class="splashBars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="splashName">Meu Financeiro</div>
+  <div class="splashSub" aria-hidden="true">organizando o seu dinheiro</div>
+</div>
+<script>(function(){var s=document.getElementById('splash');if(!s)return;if(document.documentElement.classList.contains('splash-skip')){s.remove();return;}
+var t0=Date.now(),done=false;function out(){if(done)return;done=true;s.classList.add('out');setTimeout(function(){if(s.parentNode)s.parentNode.removeChild(s);},700);}
+function ready(){setTimeout(out,Math.max(1300-(Date.now()-t0),0));}
+if(document.readyState==='complete')ready();else window.addEventListener('load',ready);setTimeout(out,4000);})();</script>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
   <defs>
