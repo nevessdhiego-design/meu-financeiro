@@ -377,3 +377,38 @@ test('monthSummary soma as faturas pagas do mês à parte', () => {
   const s = lib.monthSummary([{ data: '2026-11-10', valor: 400, tipo: 'Saída', forma: 'Pix', categoria: 'Fatura paga' }], '2026-11');
   assert.deepEqual([s.faturasPagas, s.saidas], [400, 0]);
 });
+
+test('limite do cartão: parcelas que ainda vão vir contam como limite em uso', () => {
+  const t = [
+    { data: '2026-11-08', valor: 300, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras', descricao: 'Padaria' },
+    { data: '2026-11-09', valor: 100, tipo: 'Saída', forma: 'Crédito', categoria: 'Compras', descricao: 'Magalu - Parcela 3/10' }, // faltam 7 x 100
+    { data: '2026-11-09', valor: 50, tipo: 'Saída', forma: 'Débito', categoria: 'Compras', descricao: 'Loja X 1/3' }, // débito: não pesa no limite
+  ];
+  const c = lib.cardSummary(t, { cartaoFecha: 5, cartaoVence: 12, cartaoLimite: 2000 }, '2026-11-15');
+  assert.equal(c.aberta.total, 400);
+  assert.equal(c.parcelas, 700);
+  assert.equal(c.usado, 1100);
+  assert.equal(c.livre, 900);
+});
+
+test('parcelas com a data da compra original vão para a data da fatura (na importação e no que já foi importado)', () => {
+  const raw = [
+    { data: '2026-11-02', valor: 80, descricao: 'Padaria Central' },
+    { data: '2026-11-04', valor: 120, descricao: 'Pizzaria Exemplo' },
+    { data: '2026-07-15', valor: 200, descricao: 'Magalu - Parcela 4/10' }, // compra de julho, 4ª parcela na fatura de novembro
+    { data: '2026-11-03', valor: 90, descricao: 'Loja Y - Parcela 1/6' }, // 1ª parcela: data é a da compra
+  ];
+  const list = lib.bankTransactions(raw.map((r) => ({ ...r, valor: r.valor })), { isCard: true });
+  assert.deepEqual(list.map((x) => x.data), ['2026-11-02', '2026-11-04', '2026-11-04', '2026-11-03']);
+  assert.equal(list[2].dataOriginal, '2026-07-15');
+  assert.ok(lib.importSanity(list, { isCard: true }).some((w) => /data da compra original/.test(w)));
+  const antigo = [
+    { id: 'tx_1700000000000_0_a', data: '2026-11-04', valor: 120, tipo: 'Saída', forma: 'Crédito', descricao: 'Pizzaria' },
+    { id: 'tx_1700000000000_1_b', data: '2026-07-15', valor: 200, tipo: 'Saída', forma: 'Crédito', descricao: 'Magalu - Parcela 4/10' },
+    { id: 'tx_1700000099999_0_c', data: '2026-07-15', valor: 10, tipo: 'Saída', forma: 'Crédito', descricao: 'Sozinha - Parcela 2/3' }, // lote sem âncora: não mexe
+  ];
+  const r = lib.fixInstallmentDates(antigo);
+  assert.equal(r.changed, 1);
+  assert.deepEqual(r.transactions.map((x) => x.data), ['2026-11-04', '2026-11-04', '2026-07-15']);
+  assert.ok(lib.dataWarnings(antigo, '2026-11').some((w) => w.id === 'parcelas-datas'));
+});

@@ -3,7 +3,7 @@
 const { fmt, pct, escapeHtml, pad2, todayISO, curMonth, shiftMonth, monthLabel, monthShort, normalizeImportText,
         parseImportNumber, parseImportDate, monthlyTotals, matchesSearch, backupStatus,
         dayLabel, groupByDay, categoryTotals, monthSummary, installmentSchedule, dataWarnings, recategorize,
-        applyCategoryToSimilar, isNeutral, parseInstallment, ruleKey, guessCategory, importSanity, accountBalance, cardSummary } = FinLib;
+        applyCategoryToSimilar, isNeutral, parseInstallment, ruleKey, guessCategory, importSanity, accountBalance, cardSummary, fixInstallmentDates } = FinLib;
 
 let transactions = [];
 let editingId = null;
@@ -289,8 +289,8 @@ function renderGeral(){
     kFechadaLabel.textContent = `Última fatura${card.fechada.due ? ' (vence '+dd(card.fechada.due)+')' : ''}`;
     kFechada.textContent = card.fechada.faltam>0 ? `${fmt(card.fechada.faltam)} a pagar` : `${fmt(card.fechada.total)} paga`;
   }else{ kFechadaLabel.textContent = 'Última fatura'; kFechada.textContent = '—'; }
-  kLivre.textContent = card.limite>0 ? fmt(card.livre) : '—';
-  kNote.textContent = card.limite>0 ? `${fmt(card.usado)} do limite de ${fmt(card.limite)} em uso (fatura aberta + última não paga)` : '';
+  kLivre.textContent = card.limite>0 ? fmt(Math.max(card.livre,0)) : '—';
+  kNote.textContent = card.limite>0 ? `${fmt(card.usado)} do limite de ${fmt(card.limite)} em uso: fatura aberta + última não paga + ${fmt(card.parcelas)} em parcelas que ainda vão vir` : '';
 
   // 3) Resultado do mês: tudo que foi gasto, na conta ou no cartão
   heroMonth.textContent = monthLabel(selectedMonth);
@@ -512,7 +512,7 @@ function renderInsights(){
   const warns = dataWarnings(transactions, selectedMonth);
   insightsPanel.hidden = !warns.length;
   insightList.innerHTML = warns.map(w=>{
-    const label = w.fix==='fatura-paga' ? 'Corrigir' : w.fix==='reanalisar' ? 'Reanalisar' : '';
+    const label = w.fix==='fatura-paga' || w.fix==='parcelas-datas' ? 'Corrigir' : w.fix==='reanalisar' ? 'Reanalisar' : '';
     return `<div class="insight ${w.level}"><span>${escapeHtml(w.text)}</span>`
       + (label ? `<button type="button" data-fix="${w.fix}" data-ids="${escapeHtml((w.fixIds||[]).join(','))}">${label}</button>` : '') + '</div>';
   }).join('');
@@ -523,6 +523,10 @@ insightList.addEventListener('click', e=>{
     const ids = new Set(b.dataset.ids.split(',').filter(Boolean));
     transactions = transactions.map(t=>ids.has(t.id) ? {...t, categoria:'Fatura paga'} : t);
     saveLocalState(); render(); showToast('Pagamento da fatura marcado: não conta mais em dobro ✓');
+  }else if(b.dataset.fix==='parcelas-datas'){
+    const r = fixInstallmentDates(transactions);
+    transactions = r.transactions; saveLocalState(); render();
+    showToast(`${r.changed} parcela(s) levada(s) para a data da fatura ✓`, 3500);
   }else if(b.dataset.fix==='reanalisar') reanalisar();
 });
 function reanalisar(){
@@ -908,7 +912,7 @@ btnIosHintClose.addEventListener('click', ()=>{
 // ---- Render geral ----
 
 // ---- Sincronização entre aparelhos (criptografada; veja docs/sincronizacao.md) ----
-const APP_VERSION = 'v18'; // igual ao cache do sw.js
+const APP_VERSION = 'v19'; // igual ao cache do sw.js
 const SYNC_KEY = 'meu-financeiro-sync';
 let syncCfg = null, syncTimer = null, syncBusy = false, syncMsg = {text:'', err:false};
 function loadSyncCfg(){ try{ syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)||'null'); }catch(e){ syncCfg = null; } }

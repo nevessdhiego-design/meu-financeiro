@@ -539,6 +539,33 @@
     return list;
   }
 
+  // Muitas faturas trazem cada parcela com a data da compra original (meses atrás). Dentro de um mesmo arquivo, a data
+  // da fatura é a da última compra à vista (ou 1ª parcela); parcelas 2, 3... bem mais velhas que ela vão para essa data,
+  // para entrar na fatura certa.
+  function installmentAnchor(items) {
+    const dates = items.filter((t) => { const p = parseInstallment(t.descricao); return !p || p.n === 1; }).map((t) => t.data).filter(Boolean).sort();
+    return dates.length ? dates[dates.length - 1] : '';
+  }
+  const needsReanchor = (t, anchor) => { const p = parseInstallment(t.descricao); return Boolean(p && p.n > 1 && anchor && t.data < anchor && daysApart(t.data, anchor) > 35); };
+
+  // Mesma correção para o que já foi importado: agrupa pelo "lote" (o id de importação carrega a hora) e reancora.
+  function fixInstallmentDates(transactions) {
+    const batches = new Map();
+    for (const t of transactions) {
+      const m = /^tx_(\d+)_/.exec(String(t.id));
+      if (!m || t.forma !== 'Crédito' || t.tipo !== 'Saída' || !t.data) continue;
+      if (!batches.has(m[1])) batches.set(m[1], []);
+      batches.get(m[1]).push(t);
+    }
+    const patch = new Map();
+    for (const items of batches.values()) {
+      const anchor = installmentAnchor(items);
+      for (const t of items) if (needsReanchor(t, anchor)) patch.set(t.id, anchor);
+    }
+    const list = transactions.map((t) => (patch.has(t.id) ? { ...t, data: patch.get(t.id), dataOriginal: t.data } : t));
+    return { transactions: list, changed: patch.size };
+  }
+
   function bankTransactions(raw, { invert = false, isCard = false, rules = null } = {}) {
     const list = raw.filter((item) => !(isCard && CARD_PAYMENT.test(normalizeText(item.descricao)))).map((item) => {
       const expense = invert ? item.valor > 0 : item.valor < 0;
@@ -555,7 +582,12 @@
       if (item.ref) transaction.ref = item.ref;
       return transaction;
     });
-    return isCard ? list : markInternalTransfers(list);
+    if (isCard) {
+      const anchor = installmentAnchor(list);
+      for (const t of list) if (needsReanchor(t, anchor)) { t.dataOriginal = t.data; t.data = anchor; }
+      return list;
+    }
+    return markInternalTransfers(list);
   }
 
   // Avisos sobre o arquivo antes de gravar: sentido invertido, conta tratada como fatura (e vice-versa).
@@ -568,6 +600,8 @@
     if (!isCard && list.length >= 4 && parcelados / list.length >= 0.4) warnings.push('Muitos itens parcelados: parece fatura de cartão. Se for, marque "É fatura de cartão".');
     const entradas = list.filter((t) => t.tipo === 'Entrada' && !isNeutral(t)).length;
     if (!isCard && list.length >= 4 && entradas === 0) warnings.push('Só há saídas neste arquivo. Se ele tem entradas, tente "Inverter entradas e saídas".');
+    const reancoradas = list.filter((t) => t.dataOriginal).length;
+    if (reancoradas) warnings.push(`${reancoradas} parcela(s) vieram com a data da compra original; usei a data da fatura para elas, para entrarem no mês certo.`);
     const neutros = list.filter(isNeutral).length;
     if (neutros) warnings.push(`${neutros} movimentação(ões) (pagamento de fatura, transferência própria ou resgate) não entram nas entradas e saídas, para não contar em dobro.`);
     return warnings;
@@ -666,15 +700,17 @@
       const start = isoDay(y, m, 1), end = isoDay(y, m, 31);
       aberta = { start, end, due: '', total: total(start, end) };
     }
-    const usado = limite > 0 ? aberta.total + (fechada ? fechada.faltam : 0) : 0;
-    return { configurado: fecha >= 1 && fecha <= 31, aberta, fechada, limite, usado, livre: limite > 0 ? limite - usado : 0 };
+    // Compra parcelada ocupa o limite pelo valor todo: as parcelas que ainda vão vir (da fatura aberta em diante) contam como limite em uso.
+    const parcelas = installmentSchedule(transactions, shiftMonth(aberta.end.slice(0, 7), -1), 6, true);
+    const usado = limite > 0 ? aberta.total + (fechada ? fechada.faltam : 0) + parcelas.total : 0;
+    return { configurado: fecha >= 1 && fecha <= 31, aberta, fechada, limite, usado, livre: limite > 0 ? limite - usado : 0, parcelas: parcelas.total };
   }
 
   // Parcelas já lançadas que ainda vão cair nos próximos meses (a partir da última parcela vista de cada compra).
-  function installmentSchedule(transactions, fromMonth, horizon = 6) {
+  function installmentSchedule(transactions, fromMonth, horizon = 6, onlyCredit = false) {
     const groups = new Map();
     for (const t of transactions) {
-      if (t.tipo !== 'Saída' || isNeutral(t)) continue;
+      if (t.tipo !== 'Saída' || isNeutral(t) || (onlyCredit && t.forma !== 'Crédito')) continue;
       const inst = parseInstallment(t.descricao);
       const key = merchantKey(t.descricao);
       if (!inst || !key || !t.data) continue;
@@ -716,6 +752,11 @@
     if (lump.length && itemized >= lumpSum * 0.5) {
       out.push({ id: 'dupla-contagem', level: 'warn', fix: 'fatura-paga', fixIds: lump.map((t) => t.id),
         text: `O pagamento da fatura (${fmt(lumpSum)}) e as compras do cartão (${fmt(itemized)}) estão somados em dobro. Marcar o pagamento como "Fatura paga" faz contar só uma vez.` });
+    }
+    const fixable = fixInstallmentDates(transactions);
+    if (fixable.changed) {
+      out.push({ id: 'parcelas-datas', level: 'warn', fix: 'parcelas-datas',
+        text: `${fixable.changed} parcela(s) do cartão estão com a data da compra original (meses atrás) e por isso não entram na fatura certa nem no limite. Corrigir leva cada uma para a data da fatura em que veio.` });
     }
     if (s.saidas > 0 && s.outros / s.saidas > 0.25) {
       out.push({ id: 'muito-outros', level: 'info', fix: 'reanalisar',
@@ -768,6 +809,6 @@
     decodeBytes, parseBankDate, parseMoney, parseCSV, parseBankCSV, parseOFX,
     pdfItemsToLines, parsePdfStatement, guessCategory, guessForma, bankTransactions, markDuplicates,
     NEUTRAL_CATEGORIES, isNeutral, parseInstallment, merchantKey, ruleKey, markInternalTransfers, importSanity,
-    monthSummary, accountBalance, invoiceCycle, cardSummary, installmentSchedule, dataWarnings, recategorize, applyCategoryToSimilar,
+    monthSummary, accountBalance, invoiceCycle, cardSummary, fixInstallmentDates, installmentSchedule, dataWarnings, recategorize, applyCategoryToSimilar,
   };
 });
