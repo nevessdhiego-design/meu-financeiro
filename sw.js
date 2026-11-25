@@ -1,9 +1,10 @@
-const CACHE_NAME = 'meu-financeiro-v11';
+const CACHE_NAME = 'meu-financeiro-v12';
 const APP_SHELL = [
   './',
   './index.html',
   './css/styles.css',
   './js/lib.js',
+  './js/sync.js',
   './js/app.js',
   './manifest.webmanifest',
   './icone-financeiro.svg',
@@ -32,9 +33,12 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
-    const copy = response.clone();
-    caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+  // Rede primeiro: o app novo chega na hora, sem ficar com um arquivo velho do cache. Offline, usa o cache.
+  event.respondWith(fetch(event.request).then(response => {
+    if(response.ok){
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+    }
     return response;
-  })));
+  }).catch(() => caches.match(event.request)));
 });

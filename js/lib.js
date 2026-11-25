@@ -664,17 +664,25 @@
     return out;
   }
 
-  // Aplica as regras aprendidas e as palavras aos lançamentos ainda em "Outros". Devolve a nova lista e quantos mudaram.
+  // Reanalisa todos os lançamentos que o Dhiego não corrigiu à mão (manual): aplica as regras aprendidas e as palavras
+  // da descrição e refaz o pareamento de transferências próprias. Nunca troca uma categoria por "Outros".
+  // Devolve a nova lista, quantos mudaram e a lista de mudanças ({ id, de, para }) para mostrar antes de gravar.
   function recategorize(transactions, rules = null) {
-    let changed = 0;
-    const list = transactions.map((t) => {
-      if (t.categoria && t.categoria !== 'Outros') return t;
-      const categoria = guessCategory(t.descricao, t.tipo, '', rules);
-      if (categoria === 'Outros') return t;
-      changed++;
-      return { ...t, categoria };
+    const work = transactions.map((t) => ({ ...t }));
+    const before = new Map(work.map((t) => [t.id, t.categoria]));
+    for (const t of work) {
+      if (t.manual) continue;
+      const guess = guessCategory(t.descricao, t.tipo, '', rules);
+      if (guess !== 'Outros' && guess !== t.categoria) t.categoria = guess;
+    }
+    markInternalTransfers(work.filter((t) => !t.manual && t.data && (t.tipo === 'Saída' || t.tipo === 'Entrada')));
+    const changes = [];
+    const list = transactions.map((orig, i) => {
+      if (work[i].categoria === before.get(orig.id)) return orig;
+      changes.push({ id: orig.id, de: orig.categoria || 'Outros', para: work[i].categoria });
+      return work[i];
     });
-    return { transactions: list, changed };
+    return { transactions: list, changed: changes.length, changes };
   }
 
   // Aplica uma categoria a todos os lançamentos do mesmo estabelecimento e tipo (exceto o próprio). Devolve quantos mudaram.

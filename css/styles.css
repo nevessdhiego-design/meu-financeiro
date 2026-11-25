@@ -349,3 +349,9 @@ body.privacy .money,body.privacy .evoSvg,body.privacy .spark,body.privacy .stack
 .metaRow span{flex:1;}
 .metaRow button{color:var(--muted);padding:4px 8px;}
 .budgetExtra{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:.8rem;color:var(--muted);}
+
+#syncStatus:empty{display:none;}
+#syncStatus.err{color:var(--neg);}
+#syncOff .seg{margin:6px 0 10px;}
+#syncSheet .btn{width:100%;margin-top:12px;}
+#syncSheet [hidden]{display:none !important;}

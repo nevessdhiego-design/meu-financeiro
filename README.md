@@ -25,6 +25,7 @@ Aplicativo web de **controle financeiro pessoal**: visão geral do mês, lançam
 - **Backup:** exporta um JSON pela **folha de compartilhar** do celular (Arquivos, iCloud Drive etc.) ou por download no computador, avisa quando o último backup está velho e restaura com prévia antes de gravar.
 - **Tema claro e escuro:** segue o aparelho e pode ser fixado em **Mais → Tema**.
 - **Importar extrato do banco:** lê arquivos **OFX**, **CSV** e **PDF** com texto exportados pelo banco ou pelo cartão (conta corrente e fatura), tudo no próprio aparelho (o leitor de PDF, pdf.js, é baixado com verificação de integridade só quando se importa um PDF). Reconhece as colunas sozinho, sugere a categoria pela descrição, ignora o que já foi importado (não duplica ao reimportar) e mostra uma prévia com as opções "fatura de cartão" e "inverter entradas e saídas" antes de gravar. Pagamento de fatura, transferência entre contas próprias e resgate são tratados como movimentação neutra (não contam como gasto nem ganho), parcelas (`3/10`) são reconhecidas e projetadas nos meses seguintes, e o app avisa quando os números não fazem sentido (por exemplo, mês só com compras no cartão). A categoria é sugerida por palavras e passa a aprender: ao corrigir um lançamento, o app aplica a mesma categoria aos parecidos e às próximas importações. Há exemplos fictícios em [`docs/exemplos/`](docs/exemplos).
+- **Sincronização entre aparelhos (opcional):** notebook e celular iguais, com os dados criptografados no próprio aparelho (AES-GCM, chave derivada de uma senha que nunca sai dele) e guardados em um projeto Supabase próprio. A mesclagem usa o lançamento mais recente e registra os apagados. Passo a passo em [`docs/sincronizacao.md`](docs/sincronizacao.md).
 - **Planilhas:** importação e exportação de `.xlsx`.
 - **PWA:** `manifest` e *service worker* para instalar na tela inicial e abrir sem internet.
 
@@ -45,12 +46,12 @@ Os dados do app instalado ficam separados dos do Safari, então **faça o backup
 | Armazenamento | `localStorage` do navegador |
 | Planilhas | [SheetJS](https://sheetjs.com/) por CDN, com verificação de integridade (SRI) |
 | API opcional | Python, FastAPI e SQLite, em `backend/` (veja o [README do backend](backend/README.md)) |
-| Testes | `node --test` na lógica (42 testes) e `pytest` na API (13 testes), ambos na CI do GitHub |
+| Testes | `node --test` na lógica (50 testes) e `pytest` na API (13 testes), ambos na CI do GitHub |
 
 Decisões que valem destacar:
 
 - **Privacidade por padrão:** nada sai do navegador. O repositório não contém dados reais; os valores iniciais e o conteúdo de `?demo` são fictícios.
-- **Sem dependência de servidor:** a API existe para a próxima etapa (sincronização entre aparelhos), mas o app não precisa dela.
+- **Sem dependência de servidor:** o app funciona sozinho; a sincronização entre aparelhos é opcional e usa um projeto Supabase do próprio usuário, com tudo criptografado antes de sair.
 - **Segurança na interface:** tudo o que vem de planilha ou de backup é escapado antes de ir para o HTML.
 - **Fuso horário correto:** datas e meses usam o horário local, não UTC.
 - **Pensado para o celular:** barra de abas ao alcance do polegar, folhas que sobem de baixo para lançar e editar, campos de 16 px (o Safari não dá zoom ao digitar), teclado decimal no valor e pedido de armazenamento persistente.
@@ -94,7 +95,7 @@ A documentação interativa da API fica em `http://127.0.0.1:8000/docs`.
 
 ## Próximos passos
 
-- Autenticação e sincronização (por exemplo, Supabase com Auth e RLS, ou a API própria com login).
+- Autenticação na API própria (a sincronização atual usa o Supabase com dados criptografados no aparelho).
 - Orçamento por categoria editável, lançamentos recorrentes e regras de categoria personalizadas para a importação.
 - Testes automatizados da interface.
 

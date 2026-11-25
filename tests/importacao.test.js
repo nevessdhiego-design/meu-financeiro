@@ -300,11 +300,17 @@ test('recategorize e applyCategoryToSimilar só mexem no que deve', () => {
   const t = [
     { id: '1', descricao: 'Drogasil 1', tipo: 'Saída', categoria: 'Outros' },
     { id: '2', descricao: 'Coisa estranha', tipo: 'Saída', categoria: 'Outros' },
-    { id: '3', descricao: 'Padaria', tipo: 'Saída', categoria: 'Lazer' },
+    { id: '3', descricao: 'Padaria', tipo: 'Saída', categoria: 'Lazer', manual: true },
+    { id: '4', descricao: 'Pagamento fatura cartão', tipo: 'Saída', categoria: 'Cartão', data: '2026-11-10', valor: 100 },
+    { id: '5', descricao: 'Parcela do celular', tipo: 'Saída', categoria: 'Celular' },
+    { id: '6', descricao: 'Transferência enviada - Dhiego Exemplo', tipo: 'Saída', categoria: 'Outros', data: '2026-11-12', valor: 50 },
+    { id: '7', descricao: 'Transferência recebida - Dhiego Exemplo', tipo: 'Entrada', categoria: 'Outros', data: '2026-11-12', valor: 50 },
   ];
   const r = lib.recategorize(t);
-  assert.equal(r.changed, 1);
-  assert.deepEqual(r.transactions.map((x) => x.categoria), ['Saúde', 'Outros', 'Lazer']);
+  assert.deepEqual(r.transactions.map((x) => x.categoria), ['Saúde', 'Outros', 'Lazer', 'Fatura paga', 'Celular', 'Transferência própria', 'Transferência própria']);
+  assert.equal(r.changed, 4);
+  assert.deepEqual(r.changes.find((c) => c.id === '4'), { id: '4', de: 'Cartão', para: 'Fatura paga' });
+  assert.equal(t[3].categoria, 'Cartão'); // a lista original não é alterada
   const base = [{ id: 'a', descricao: 'Padaria Central 1', tipo: 'Saída', categoria: 'Outros' }, { id: 'b', descricao: 'Compra - Padaria Central 22', tipo: 'Saída', categoria: 'Outros' }, { id: 'c', descricao: 'Mercado X', tipo: 'Saída', categoria: 'Outros' }];
   const a = lib.applyCategoryToSimilar(base, base[0], 'Alimentação');
   assert.equal(a.changed, 1);

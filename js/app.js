@@ -13,6 +13,8 @@ let pendingRestore = null;
 let firstUseMonthValue = null; // mantido só para compatibilidade com backups antigos
 let selectedMonth = curMonth();
 let tipoFilter = '';
+let tombstones = {}; // lançamentos apagados (para a sincronização saber que foram apagados)
+let configUpdatedAt = 0;
 let categoryRules = {}; // categorias que o Dhiego ensinou: { 'Saída:padaria joao': 'Alimentação' }
 
 // Valores iniciais fictícios: o app não traz dados reais de ninguém.
@@ -35,11 +37,28 @@ function loadLocalState(){
     if(Array.isArray(saved.transactions)) transactions = saved.transactions;
     if(saved.firstUseMonth) firstUseMonthValue = saved.firstUseMonth;
     if(saved.rules && typeof saved.rules==='object') categoryRules = saved.rules;
+    if(saved.tombstones && typeof saved.tombstones==='object') tombstones = saved.tombstones;
+    if(saved.configUpdatedAt) configUpdatedAt = saved.configUpdatedAt;
   }catch(e){ console.warn('Não foi possível ler os dados locais', e); }
 }
-function saveLocalState(){
-  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({config,transactions,firstUseMonth:firstUseMonthValue,rules:categoryRules})); }
+// Cada lançamento guarda u (quando mudou) e apagar deixa uma "lápide": é isso que permite mesclar dois aparelhos.
+let snapTx = new Map(), snapCfg = '', snapRules = '';
+const sigOf = t => { const {u, ...rest} = t; return JSON.stringify(rest); };
+function resetSnapshots(){ snapTx = new Map(transactions.map(t=>[t.id, sigOf(t)])); snapCfg = JSON.stringify(config); snapRules = JSON.stringify(categoryRules); }
+function stampChanges(){
+  const now = Date.now(), ids = new Set();
+  transactions.forEach(t=>{ ids.add(t.id); if(snapTx.get(t.id)!==sigOf(t)) t.u = now; });
+  for(const id of snapTx.keys()) if(!ids.has(id) && !String(id).startsWith('demo_')) tombstones[id] = now;
+  if(JSON.stringify(config)!==snapCfg) configUpdatedAt = now;
+  resetSnapshots();
+}
+function persistRaw(){
+  try{ localStorage.setItem(STORAGE_KEY, JSON.stringify({config,transactions,firstUseMonth:firstUseMonthValue,rules:categoryRules,tombstones,configUpdatedAt})); }
   catch(e){ console.warn('Não foi possível salvar os dados locais', e); }
+}
+function saveLocalState(){
+  stampChanges(); persistRaw();
+  if(typeof scheduleSync==='function') scheduleSync();
 }
 
 function showToast(message, ms=2200){
@@ -72,7 +91,7 @@ function closeOnBackdrop(dialog){
     if(e.clientX<r.left || e.clientX>r.right || e.clientY<r.top || e.clientY>r.bottom) dialog.close();
   });
 }
-[transactionModal, moreSheet, reservaModal, deleteModal, clearModal, restoreModal].forEach(closeOnBackdrop);
+[transactionModal, moreSheet, reservaModal, deleteModal, clearModal, restoreModal, syncSheet].forEach(closeOnBackdrop);
 
 // ---- Navegação ----
 function goTab(name){
@@ -169,6 +188,8 @@ form.addEventListener('submit', e=>{
   if(!d || isNaN(v)) return;
   const payload = { descricao:d, valor:v, tipo:tipo.value, categoria:categoria.value, forma:forma.value,
     pago:pago.value, data: data.value || todayISO() };
+  const prev = editingId ? transactions.find(x=>x.id===editingId) : null;
+  if((prev && (prev.manual || prev.categoria!==payload.categoria)) || (!prev && categoriaTouched)) payload.manual = true; // categoria escolhida por você: o Reanalisar não mexe
   if(editingId){
     const old = transactions.find(x=>x.id===editingId);
     const id = editingId;
@@ -497,8 +518,14 @@ insightList.addEventListener('click', e=>{
 });
 function reanalisar(){
   const r = recategorize(transactions, categoryRules);
+  if(!r.changed){ showToast('Tudo já está classificado: nada para mudar', 3200); return; }
+  const groups = {};
+  r.changes.forEach(c=>{ const k = `${c.de} → ${c.para}`; groups[k] = (groups[k]||0)+1; });
+  const resumo = Object.entries(groups).sort((a,b)=>b[1]-a[1]).slice(0,8).map(([k,n])=>`${n}× ${k}`).join(String.fromCharCode(10));
+  const NL = String.fromCharCode(10);
+  if(!window.confirm(`Reanalisar vai mudar a categoria de ${r.changed} lançamento(s):${NL}${NL}${resumo}${NL}${NL}Os que você corrigiu à mão não mudam. Continuar?`)) return;
   transactions = r.transactions; saveLocalState(); render();
-  showToast(r.changed ? `${r.changed} lançamento(s) reclassificado(s) ✓` : 'Nada novo para reclassificar', 3200);
+  showToast(`${r.changed} lançamento(s) reclassificado(s) ✓`, 3200);
 }
 btnReanalisar.addEventListener('click', ()=>{ moreSheet.close(); reanalisar(); });
 
@@ -870,6 +897,103 @@ btnIosHintClose.addEventListener('click', ()=>{
 });
 
 // ---- Render geral ----
+
+// ---- Sincronização entre aparelhos (criptografada; veja docs/sincronizacao.md) ----
+const SYNC_KEY = 'meu-financeiro-sync';
+let syncCfg = null, syncTimer = null, syncBusy = false, syncMsg = {text:'', err:false};
+function loadSyncCfg(){ try{ syncCfg = JSON.parse(localStorage.getItem(SYNC_KEY)||'null'); }catch(e){ syncCfg = null; } }
+function saveSyncCfg(){ try{ if(syncCfg) localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg)); else localStorage.removeItem(SYNC_KEY); }catch(e){} }
+const syncWhen = at => new Date(at).toLocaleString('pt-BR', {dateStyle:'short', timeStyle:'short'});
+function syncErrorText(e){
+  const m = e && e.message || '';
+  if(m==='senha-incorreta') return 'A senha de criptografia não confere com a do outro aparelho.';
+  if(m==='sem-dados') return 'Não encontrei dados com este código. Confira o código.';
+  if(m==='conflito') return 'Dois aparelhos gravaram ao mesmo tempo. Tente de novo.';
+  if(m==='http-401' || m==='http-403') return 'O Supabase recusou a chave. Confira o endereço e a chave pública.';
+  if(m==='http-404') return 'As funções do Supabase não existem. Rode o SQL de docs/sincronizacao.sql.';
+  if(e && e.name==='TypeError') return 'Sem conexão com o servidor. Confira a internet e o endereço.';
+  return 'Não foi possível sincronizar agora.';
+}
+function renderSync(){
+  const on = Boolean(syncCfg);
+  syncOff.hidden = on; syncOn.hidden = !on;
+  syncSub.textContent = !on ? 'Notebook e celular, com criptografia'
+    : syncBusy ? 'Sincronizando…' : syncCfg.error ? 'Ativa · com erro' : syncCfg.last ? `Ativa · última: ${syncWhen(syncCfg.last)}` : 'Ativa';
+  const text = syncBusy ? 'Sincronizando…' : on ? (syncCfg.error ? syncErrorText({message:syncCfg.error}) : syncCfg.last ? `Última sincronização: ${syncWhen(syncCfg.last)}` : '') : syncMsg.text;
+  syncStatus.textContent = text; syncStatus.classList.toggle('err', Boolean(on ? syncCfg.error : syncMsg.err));
+  if(on) syncCodeShow.value = FinSync.makePairCode({url:syncCfg.url, key:syncCfg.key, id:syncCfg.id});
+}
+function getSyncState(){ return {transactions, tombstones, config, configUpdatedAt, rules:categoryRules}; }
+async function applyMerged(merged){
+  const m = FinSync.mergeStates(getSyncState(), merged); // reaplica o que você mexeu durante o envio
+  transactions = [...transactions.filter(t=>String(t.id).startsWith('demo_')), ...m.transactions];
+  tombstones = m.tombstones; config = {...DEFAULT_CONFIG, ...m.config}; configUpdatedAt = m.configUpdatedAt; categoryRules = m.rules;
+  resetSnapshots(); persistRaw(); fillCfgForm(); render();
+}
+async function runSync(){
+  if(!syncCfg || syncBusy) return;
+  syncBusy = true; renderSync();
+  try{
+    const key = await FinSync.importKey(syncCfg.keyB64);
+    const client = FinSync.createClient({url:syncCfg.url, key:syncCfg.key});
+    const r = await FinSync.syncOnce({client, key, syncId:syncCfg.id, getLocal:getSyncState, applyMerged});
+    syncCfg.last = r.at; delete syncCfg.error;
+  }catch(e){ syncCfg.error = (e && e.message) || 'erro'; if(e && e.name==='TypeError') syncCfg.error = 'TypeError'; console.warn('sincronização falhou:', e && e.message); }
+  syncBusy = false; saveSyncCfg(); renderSync();
+}
+function scheduleSync(){
+  if(!syncCfg) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(runSync, 2500);
+}
+function mapSyncError(e){ return syncErrorText(e && e.name==='TypeError' ? {name:'TypeError'} : e); }
+async function activateSync({url, key, id, pass, joining}){
+  const derived = await FinSync.deriveKey(pass, id);
+  const keyB64 = await FinSync.exportKey(derived);
+  if(joining){ // ao conectar, o código precisa apontar para dados que existem e a senha precisa abri-los
+    const client = FinSync.createClient({url, key});
+    const remote = await client.get(id);
+    if(!remote) throw new Error('sem-dados');
+    await FinSync.decryptJSON(derived, remote.data);
+  }
+  syncCfg = {url, key, id, keyB64};
+  saveSyncCfg(); await runSync();
+}
+syncMode.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{
+  syncMode.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+  syncCreate.hidden = b.dataset.m!=='create'; syncJoin.hidden = b.dataset.m!=='join';
+  syncMsg = {text:'', err:false}; renderSync();
+}));
+btnSyncCreate.addEventListener('click', async ()=>{
+  const url = syncUrl.value.trim().replace(/\/+$/,''), key = syncKey.value.trim();
+  if(!FinSync.validUrl(url) || !key){ syncMsg = {text:'Preencha o endereço (https://…) e a chave pública.', err:true}; renderSync(); return; }
+  if(syncPass.value.length<8){ syncMsg = {text:'Use uma senha de pelo menos 8 caracteres.', err:true}; renderSync(); return; }
+  if(syncPass.value!==syncPass2.value){ syncMsg = {text:'As duas senhas não são iguais.', err:true}; renderSync(); return; }
+  syncMsg = {text:'Ativando…', err:false}; renderSync();
+  try{ await activateSync({url, key, id:crypto.randomUUID(), pass:syncPass.value}); syncPass.value = syncPass2.value = ''; if(syncCfg && syncCfg.error){ const e = syncCfg.error; syncCfg = null; saveSyncCfg(); throw new Error(e); } }
+  catch(e){ syncCfg = null; saveSyncCfg(); syncMsg = {text:mapSyncError(e), err:true}; renderSync(); }
+});
+btnSyncJoin.addEventListener('click', async ()=>{
+  const p = FinSync.parsePairCode(syncCode.value);
+  if(!p){ syncMsg = {text:'Código inválido. Copie de novo, inteiro.', err:true}; renderSync(); return; }
+  if(!syncPassJoin.value){ syncMsg = {text:'Digite a senha de criptografia.', err:true}; renderSync(); return; }
+  syncMsg = {text:'Conectando…', err:false}; renderSync();
+  try{ await activateSync({...p, pass:syncPassJoin.value, joining:true}); syncPassJoin.value = ''; syncCode.value = ''; if(syncCfg && syncCfg.error){ const e = syncCfg.error; syncCfg = null; saveSyncCfg(); throw new Error(e); } }
+  catch(e){ syncCfg = null; saveSyncCfg(); syncMsg = {text:mapSyncError(e), err:true}; renderSync(); }
+});
+btnSyncNow.addEventListener('click', runSync);
+btnSyncOff.addEventListener('click', ()=>{ syncCfg = null; saveSyncCfg(); syncMsg = {text:'Sincronização desativada neste aparelho.', err:false}; renderSync(); });
+btnCopyCode.addEventListener('click', async ()=>{
+  const code = syncCodeShow.value;
+  try{
+    if(navigator.share){ await navigator.share({text:code}); return; }
+    await navigator.clipboard.writeText(code); showToast('Código copiado ✓');
+  }catch(e){ if(e && e.name==='AbortError') return; syncCodeShow.select(); showToast('Selecione e copie o código'); }
+});
+btnSync.addEventListener('click', ()=>{ moreSheet.close(); renderSync(); syncSheet.showModal(); });
+btnCloseSync.addEventListener('click', ()=>syncSheet.close());
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') scheduleSync(); });
+window.addEventListener('online', scheduleSync);
+
 function render(){
   monthText.textContent = cap(monthLabel(selectedMonth));
   controlMes.value = selectedMonth;
@@ -886,6 +1010,7 @@ function render(){
 (function init(){
   try{
     loadLocalState();
+    resetSnapshots();
     selectedMonth = curMonth();
     applyPrivacy(localStorage.getItem(PRIVACY_KEY)==='1');
     // pede ao navegador para não apagar os dados do site por falta de espaço (iOS/Android)
@@ -894,7 +1019,9 @@ function render(){
   fillCfgForm();
   populateFilters();
   fMes.value = selectedMonth;
+  loadSyncCfg(); renderSync();
   render();
+  scheduleSync();
   // Atalhos de URL para apresentação: ?demo carrega os dados de exemplo; &tab=lanc|plan abre a aba;
   // &privacidade oculta os valores; &tema=claro|escuro força o tema sem gravá-lo.
   const params = new URLSearchParams(location.search);
