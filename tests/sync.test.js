@@ -78,10 +78,11 @@ test('dois aparelhos: lançar num, aparece no outro; editar e apagar também; co
   const server = fakeServer();
   const notebook = device(server, key, id), celular = device(server, key, id);
 
-  notebook.s = state([tx('a', NOW - 10), tx('b', NOW - 10)], { config: { salario: 3000 }, configUpdatedAt: NOW - 10 });
+  notebook.s = state([tx('a', NOW - 10, { descricao: 'Padaria Secreta do Bairro' }), tx('b', NOW - 10)], { config: { salario: 3000 }, configUpdatedAt: NOW - 10 });
   const r1 = await notebook.sync();
   assert.equal(r1.pushed, true);
-  assert.ok(![...server.rows.values()][0].data.includes('xa')); // o servidor só vê texto ilegível
+  const guardado = [...server.rows.values()][0].data;
+  assert.ok(!guardado.includes('Padaria') && !guardado.includes('Secreta')); // o servidor só vê texto ilegível
 
   const r2 = await celular.sync();
   assert.equal(r2.pulled, true);
